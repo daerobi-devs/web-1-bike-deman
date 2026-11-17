@@ -1,0 +1,15 @@
+# Environment & Secrets
+.env
+.env.local
+.env*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+
+# Textbook PDF (local reference only)
+Buku*.pdf

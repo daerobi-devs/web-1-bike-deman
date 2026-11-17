@@ -1,0 +1,13 @@
+.git
+.gitignore
+.env
+.env.local
+.env*.local
+__pycache__
+*.pyc
+screenshots
+*.docx
+*.html
+*.pdf
+generate_theme_video.py
+seed_daeroom_db.py
