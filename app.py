@@ -91,7 +91,7 @@ def load_bike_data():
             rows = res.get("rows", [])
             if rows:
                 df = pd.DataFrame(rows)
-                source_label = "Daeroom Cloud PostgreSQL (db_bikesharingdemand)"
+                source_label = "Cloud PostgreSQL (Live)"
         except Exception:
             df = None
 
@@ -609,7 +609,7 @@ elif selected_menu == "6. Tampilan Media Multimedia (Bab 2.6)":
 
         st.divider()
         st.markdown("### 3. Menampilkan Pemutar Video (`st.video`)")
-        st.caption("Animasi simulasi pola penyewaan sepeda 24 jam (stream dari Daeroom MinIO S3):")
+        st.caption("Animasi simulasi pola penyewaan sepeda 24 jam (Cloud Object Storage):")
         s3_video_url = "https://s3.daeroom.my.id/bikesharingdemand-assets/media/bike_sharing_demo.mp4"
         st.video(s3_video_url)
 
@@ -836,14 +836,14 @@ elif selected_menu == "9. Showcase Terpadu: Simulator Bike Sharing":
     st.success("Showcase Terpadu ini menggabungkan seluruh elemen Bab 1 dan Bab 2 secara komprehensif, berbasis dataset Bike Sharing Demand Kelompok 7.")
 
     st.divider()
-    st.markdown("#### Penyimpanan & Riwayat Simulasi (Daeroom Cloud PostgreSQL)")
+    st.markdown("#### Penyimpanan & Riwayat Simulasi (Cloud PostgreSQL)")
     col_save, col_note = st.columns([1, 2])
     with col_note:
         sim_note = st.text_input("Catatan Operasional (Opsional):", placeholder="Misal: Shift pagi cuaca cerah sekitar stasiun metro")
     with col_save:
         st.write("")
         st.write("")
-        if st.button("Simpan Simulasi ke Daeroom Cloud", type="primary", use_container_width=True):
+        if st.button("Simpan Simulasi ke Database", type="primary", use_container_width=True):
             if DAEROOM_AVAILABLE:
                 try:
                     query_db(
@@ -862,11 +862,11 @@ elif selected_menu == "9. Showcase Terpadu: Simulator Bike Sharing":
                             sim_note or "Simulasi rutin",
                         ],
                     )
-                    st.toast("Simulasi berhasil disimpan ke PostgreSQL Daeroom Cloud.")
+                    st.toast("Simulasi berhasil disimpan ke database.")
                 except Exception as err:
-                    st.error(f"Gagal menyimpan ke Daeroom Cloud: {err}")
+                    st.error(f"Gagal menyimpan ke database: {err}")
             else:
-                st.warning("Koneksi Daeroom Cloud belum aktif.")
+                st.warning("Koneksi database belum aktif.")
 
     if DAEROOM_AVAILABLE:
         try:
