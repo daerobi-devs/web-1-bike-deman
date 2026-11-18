@@ -11,7 +11,9 @@ import plotly.express as px
 st.title("Praktik 2.4: Visualisasi Grafik & Geografis Bike Sharing")
 
 # Memuat data
-df = pd.read_csv("tugas_streamlit_bab1_bab2/data/bike_sharing.csv")
+from pathlib import Path
+DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "bike_sharing.csv"
+df = pd.read_csv(DATA_PATH)
 df['datetime'] = pd.to_datetime(df['datetime'])
 df['hour'] = df['datetime'].dt.hour
 

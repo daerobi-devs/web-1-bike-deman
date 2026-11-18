@@ -18,7 +18,9 @@ st.write(10886)
 
 # 3. Menampilkan DataFrame sewa sepeda
 st.subheader("3. Menampilkan Struktur DataFrame Cuaca & Sewa Sepeda")
-df = pd.read_csv("tugas_streamlit_bab1_bab2/data/bike_sharing.csv")
+from pathlib import Path
+DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "bike_sharing.csv"
+df = pd.read_csv(DATA_PATH)
 st.write(df.head(5))
 
 # 4. Menampilkan dictionary parameter operasional

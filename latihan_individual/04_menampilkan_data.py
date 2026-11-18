@@ -8,7 +8,9 @@ import pandas as pd
 st.title("Praktik 2.3: Menampilkan Data Operasional Sepeda")
 
 # Memuat dataset Bike Sharing
-df = pd.read_csv("tugas_streamlit_bab1_bab2/data/bike_sharing.csv")
+from pathlib import Path
+DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "bike_sharing.csv"
+df = pd.read_csv(DATA_PATH)
 
 # 1. st.dataframe (Tabel interaktif dengan filter dan sorting)
 st.subheader("1. Tabel Interaktif Dataset (st.dataframe)")

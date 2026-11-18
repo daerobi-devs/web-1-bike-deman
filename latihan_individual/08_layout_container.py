@@ -41,7 +41,9 @@ tab_data, tab_rebalance, tab_formula = st.tabs(["Eksplorasi Data", "Jadwal Rebal
 
 with tab_data:
     st.write("Tampilan cuplikan dataset Bike Sharing Demand:")
-    df = pd.read_csv("tugas_streamlit_bab1_bab2/data/bike_sharing.csv")
+    from pathlib import Path
+    DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "bike_sharing.csv"
+    df = pd.read_csv(DATA_PATH)
     st.dataframe(df[['datetime', 'season', 'temp', 'humidity', 'count']].head(5), use_container_width=True)
 
 with tab_rebalance:

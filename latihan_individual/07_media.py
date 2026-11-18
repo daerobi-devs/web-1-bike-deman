@@ -5,23 +5,25 @@ Konteks Data: Bike Sharing Demand (Kelompok 7)
 import streamlit as st
 import os
 
+from pathlib import Path
+ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
 st.title("Praktik 2.6: Menampilkan Media Multimedia pada Bike Sharing")
 
 # 1. st.image
 st.subheader("1. Menampilkan Gambar (st.image)")
 st.caption("Menampilkan diagram kerangka kerja metodologi machine learning CRISP-DM Bike Sharing.")
-image_path = "tugas_streamlit_bab1_bab2/assets/crisp_dm_pipeline.png"
-if os.path.exists(image_path):
-    st.image(image_path, caption="Kerangka Kerja CRISP-DM Bike Sharing Demand Kelompok 7", use_container_width=True)
+image_path = ASSETS_DIR / "crisp_dm_pipeline.png"
+if image_path.exists():
+    st.image(str(image_path), caption="Kerangka Kerja CRISP-DM Bike Sharing Demand Kelompok 7", use_container_width=True)
 else:
     st.info("File gambar placeholder dapat diletakkan pada folder assets.")
 
 # 2. st.audio
 st.subheader("2. Menampilkan Pemutar Audio (st.audio)")
 st.caption("Memutar audio nada pemberitahuan / alarm stasiun sepeda saat dock hampir penuh.")
-audio_path = "tugas_streamlit_bab1_bab2/assets/station_chime.wav"
-if os.path.exists(audio_path):
-    st.audio(audio_path, format="audio/wav")
+audio_path = ASSETS_DIR / "station_chime.wav"
+if audio_path.exists():
+    st.audio(str(audio_path), format="audio/wav")
 else:
     st.info("Audio chime stasiun sepeda dapat dimuat via path lokal.")
 
