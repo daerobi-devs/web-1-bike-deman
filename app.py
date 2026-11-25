@@ -46,6 +46,32 @@ st.set_page_config(
 st.markdown(
     """
 <style>
+    [data-testid="stSidebar"] {
+        background-color: #f8fafc;
+        border-right: 1px solid #e2e8f0;
+    }
+    [data-testid="stSidebarNav"] {
+        padding-top: 0.75rem;
+    }
+    .sidebar-brand-card {
+        background: linear-gradient(135deg, #0f172a 0%, #0369a1 100%);
+        color: #f8fafc;
+        padding: 0.85rem 1rem;
+        border-radius: 10px;
+        margin-bottom: 0.5rem;
+        border: 1px solid #0284c7;
+    }
+    .sidebar-brand-card .title {
+        font-size: 1rem;
+        font-weight: 700;
+        color: #ffffff;
+        margin: 0;
+    }
+    .sidebar-brand-card .sub {
+        font-size: 0.75rem;
+        color: #bae6fd;
+        margin-top: 0.15rem;
+    }
     .hero-banner {
         background: linear-gradient(135deg, #0f172a 0%, #0369a1 100%);
         color: #f8fafc;
@@ -882,31 +908,39 @@ def page_riwayat_kesimpulan():
 
 
 # ==============================================================================
-# NAVIGASI MULTI-PAGE TERSTRUKTUR (st.navigation)
+# NAVIGASI MULTI-PAGE TERSTRUKTUR (st.navigation + Material Vector Icons)
 # ==============================================================================
 pg = st.navigation({
     "Pengantar": [
-        st.Page(page_beranda, title="Beranda", url_path="beranda", default=True),
-        st.Page(page_bab1_data, title="Tentang Dataset", url_path="dataset"),
-        st.Page(page_eda, title="Eksplorasi Data (EDA)", url_path="eda"),
+        st.Page(page_beranda, title="Beranda", icon=":material/home:", url_path="beranda", default=True),
+        st.Page(page_bab1_data, title="Tentang Dataset", icon=":material/database:", url_path="dataset"),
+        st.Page(page_eda, title="Eksplorasi Data (EDA)", icon=":material/analytics:", url_path="eda"),
     ],
     "Pengolahan & Pemodelan": [
-        st.Page(page_preprocessing_pca, title="Preprocessing & PCA", url_path="preprocessing-pca"),
-        st.Page(page_optimasi, title="Teknik Optimasi", url_path="optimasi"),
-        st.Page(page_modelling, title="Modelling & Evaluasi", url_path="modelling"),
+        st.Page(page_preprocessing_pca, title="Preprocessing & PCA", icon=":material/tune:", url_path="preprocessing-pca"),
+        st.Page(page_optimasi, title="Teknik Optimasi", icon=":material/speed:", url_path="optimasi"),
+        st.Page(page_modelling, title="Modelling & Evaluasi", icon=":material/model_training:", url_path="modelling"),
     ],
     "Penerapan": [
-        st.Page(page_simulasi, title="Simulasi & Prediksi", url_path="simulasi"),
-        st.Page(page_batch_csv, title="Prediksi Massal (CSV)", url_path="batch-csv"),
-        st.Page(page_bab2_grafik_input, title="Peta & Panel Armada", url_path="armada"),
-        st.Page(page_bab2_media_layout, title="Media & Form Distribusi", url_path="media-distribusi"),
-        st.Page(page_riwayat_kesimpulan, title="Riwayat DB & Kesimpulan", url_path="kesimpulan"),
+        st.Page(page_simulasi, title="Simulasi & Prediksi", icon=":material/bolt:", url_path="simulasi"),
+        st.Page(page_batch_csv, title="Prediksi Massal (CSV)", icon=":material/upload_file:", url_path="batch-csv"),
+        st.Page(page_bab2_grafik_input, title="Peta & Panel Armada", icon=":material/map:", url_path="armada"),
+        st.Page(page_bab2_media_layout, title="Media & Form Distribusi", icon=":material/perm_media:", url_path="media-distribusi"),
+        st.Page(page_riwayat_kesimpulan, title="Riwayat DB & Kesimpulan", icon=":material/fact_check:", url_path="kesimpulan"),
     ],
 })
 
 with st.sidebar:
     st.divider()
-    st.caption("Kelompok 7 - TI UNPAM")
+    st.markdown(
+        """
+        <div class="sidebar-brand-card">
+            <div class="title">BikeDemand AI</div>
+            <div class="sub">Kelompok 7 · Teknik Informatika UNPAM</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     st.caption("Daerobi | Hendro | Nasrudin")
 
 pg.run()
