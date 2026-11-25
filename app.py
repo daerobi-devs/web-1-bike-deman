@@ -233,7 +233,7 @@ def page_beranda():
         """
         <div class="hero-banner">
             <h1>Analisis & Prediksi Bike Sharing Demand</h1>
-            <p>Implementasi Terpadu Modul Streamlit (Bab 1 & Bab 2) hingga Pemodelan 3 Paradigma Machine Learning — Kelompok 7 UNPAM</p>
+            <p>Sistem Prediksi Kebutuhan Armada Sepeda Berbasis Machine Learning & Cloud PostgreSQL — Kelompok 7 UNPAM</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -261,14 +261,14 @@ def page_beranda():
             """,
             unsafe_allow_html=True,
         )
-        st.markdown("### Alur Sistem & Cakupan Halaman")
+        st.markdown("### Alur Sistem & Cakupan Fitur")
         st.markdown(
             """
-            1. **Pengantar & Modul Bab 1–2:** Implementasi penuh elemen teks, data display, grafik, peta, 11 widget input, multimedia, layout container, dan form control flow.
+            1. **Pengantar & Dataset:** Profil dataset Capital Bikeshare (10.886 baris), statistik deskriptif, dan indikator kinerja armada.
             2. **Eksplorasi Data (EDA):** Audit kualitas data dan temuan 10 masalah kritis (skewness, multikolinearitas `temp`/`atemp`, pola bimodal jam kerja).
             3. **Preprocessing & PCA:** Ekstraksi fitur waktu (`hour`, `month`, `year`), transformasi target `log1p`, dan reduksi dimensi PCA.
             4. **Modelling & Evaluasi:** Perbandingan objektif 3 paradigma algoritma (**Ridge**, **KNN**, dan **HistGradientBoosting**).
-            5. **Penerapan:** Simulasi prediksi real-time, prediksi massal CSV + arsip S3, serta pencatatan riwayat ke Cloud PostgreSQL.
+            5. **Penerapan:** Simulasi prediksi real-time, prediksi massal CSV, panel operasional armada, serta pencatatan riwayat ke Cloud PostgreSQL.
             """
         )
 
@@ -291,49 +291,28 @@ def page_beranda():
 
 
 # ==============================================================================
-# HALAMAN 2: BAB 1 & 2.1-2.3 (TEKS & DATA)
+# HALAMAN 2: TENTANG DATASET
 # ==============================================================================
 def page_bab1_data():
-    st.markdown("<div class='main-title'>Bab 1 & Bab 2.1–2.3: Pengenalan, Elemen Teks & Data</div>", unsafe_allow_html=True)
-    st.markdown("<div class='sub-title'>Praktik dasar Streamlit: st.write, elemen tipografi, rumus LaTeX, dataframe, table, metric, dan json.</div>", unsafe_allow_html=True)
+    st.markdown("<div class='main-title'>Tentang Dataset Bike Sharing Demand</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sub-title'>Karakteristik data historis Capital Bikeshare Washington D.C., ringkasan statistik, dan indikator utama.</div>", unsafe_allow_html=True)
 
-    t1, t2, t3 = st.tabs(["Bab 1: Setup & Aplikasi Pertama", "Bab 2.1–2.2: st.write & Elemen Teks", "Bab 2.3: Menampilkan Data"])
+    t1, t2, t3 = st.tabs(["Latar Belakang & Formula", "Data Mentah & Tabel", "Statistik & Metrik KPI"])
 
     with t1:
-        st.markdown("#### Tahapan Instalasi & Menjalankan Aplikasi Pertama (Bab 1.2–1.3)")
-        st.code(
-            "python -m venv venv\n"
-            "venv\\Scripts\\activate\n"
-            "pip install streamlit pandas numpy scikit-learn plotly\n"
-            "streamlit run app.py",
-            language="bash",
+        st.markdown("#### Latar Belakang & Tujuan Pemodelan")
+        st.write(
+            "Dataset ini merekam jumlah penyewaan sepeda per jam selama dua tahun (2011–2012) "
+            "yang dipengaruhi oleh musim, hari kerja/libur, suhu, kelembaban, dan kondisi cuaca."
         )
-        st.success("Aplikasi pertama berhasil berjalan di localhost dan siap menampilkan dataset Bike Sharing Demand.")
-
-    with t2:
-        st.markdown("#### Demonstrasi `st.write()` dan Elemen Teks (`st.title`, `st.markdown`, `st.latex`)")
-        st.write("Menampilkan ringkasan 5 baris pertama dataset menggunakan `st.write()`:")
-        st.write(df_bike[["datetime", "season", "temp", "humidity", "count"]].head(5))
         st.divider()
         st.markdown("**Formula Evaluasi Utama (RMSLE):**")
         st.latex(r"\text{RMSLE} = \sqrt{\frac{1}{n} \sum_{i=1}^{n} \left( \log(p_i + 1) - \log(a_i + 1) \right)^2}")
         st.caption("Keterangan: p_i adalah prediksi model dan a_i adalah jumlah penyewaan aktual.")
 
-    with t3:
-        st.markdown("#### 1. Tabel Interaktif (`st.dataframe`)")
-        st.dataframe(df_bike.head(15), use_container_width=True)
-
-        st.markdown("#### 2. Tabel Statistik Statis (`st.table`)")
-        stats = df_bike[["temp", "humidity", "windspeed", "casual", "registered", "count"]].describe().round(2)
-        st.table(stats.loc[["mean", "std", "min", "max"]])
-
-        st.markdown("#### 3. Kartu Indikator Kinerja (`st.metric`) & JSON (`st.json`)")
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Total Penyewaan", f"{int(df_bike['count'].sum()):,}", "+12.4%")
-        m2.metric("Rata-Rata Suhu", f"{df_bike['temp'].mean():.1f} °C", "+1.2 °C")
-        m3.metric("Porsi Komuter", f"{(df_bike['registered'].sum()/df_bike['count'].sum()*100):.1f}%")
-        m4.metric("Puncak Tertinggi", f"{int(df_bike['count'].max()):,} unit/jam")
-
+    with t2:
+        st.markdown("#### Cuplikan Data Historis")
+        st.dataframe(df_bike.head(20), use_container_width=True)
         st.json({
             "dataset": "Capital Bikeshare Washington D.C.",
             "rows": int(len(df_bike)),
@@ -341,15 +320,27 @@ def page_bab1_data():
             "data_source": DATA_SOURCE_LABEL,
         })
 
+    with t3:
+        st.markdown("#### Ringkasan Statistik Deskriptif")
+        stats = df_bike[["temp", "humidity", "windspeed", "casual", "registered", "count"]].describe().round(2)
+        st.table(stats.loc[["mean", "std", "min", "max"]])
+
+        st.markdown("#### Indikator Kinerja Utama Armada")
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Total Penyewaan", f"{int(df_bike['count'].sum()):,}", "+12.4%")
+        m2.metric("Rata-Rata Suhu", f"{df_bike['temp'].mean():.1f} °C", "+1.2 °C")
+        m3.metric("Porsi Komuter", f"{(df_bike['registered'].sum()/df_bike['count'].sum()*100):.1f}%")
+        m4.metric("Puncak Tertinggi", f"{int(df_bike['count'].max()):,} unit/jam")
+
 
 # ==============================================================================
-# HALAMAN 3: BAB 2.4-2.5 (GRAFIK & INPUT FORM)
+# HALAMAN 3: VISUALISASI & KONFIGURASI OPERASIONAL
 # ==============================================================================
 def page_bab2_grafik_input():
-    st.markdown("<div class='main-title'>Bab 2.4–2.5: Visualisasi Grafik & Input Widget</div>", unsafe_allow_html=True)
-    st.markdown("<div class='sub-title'>Implementasi line/area/bar chart, peta geografis, Altair, Plotly, 11 input widget, dan data editor.</div>", unsafe_allow_html=True)
+    st.markdown("<div class='main-title'>Visualisasi Armada & Konfigurasi Operasional</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sub-title'>Pola penyewaan per jam, peta stasiun Washington D.C., serta panel simulasi input petugas lapangan.</div>", unsafe_allow_html=True)
 
-    tab_g, tab_i = st.tabs(["Bab 2.4: Grafik & Peta", "Bab 2.5: 11 Input Widget & Data Editor"])
+    tab_g, tab_i = st.tabs(["Grafik & Peta Stasiun", "Panel Input & Editor Jadwal"])
 
     with tab_g:
         hourly = df_bike.groupby("hour")[["count", "registered", "casual"]].mean()
@@ -422,13 +413,13 @@ def page_bab2_grafik_input():
 
 
 # ==============================================================================
-# HALAMAN 4: BAB 2.6-2.8 (MEDIA, LAYOUT & CONTROL FLOW)
+# HALAMAN 4: MEDIA & ALUR OPERASIONAL
 # ==============================================================================
 def page_bab2_media_layout():
-    st.markdown("<div class='main-title'>Bab 2.6–2.8: Multimedia, Layout Container & Control Flow</div>", unsafe_allow_html=True)
-    st.markdown("<div class='sub-title'>Penerapan st.image, st.audio, st.video (S3), st.columns, st.expander, st.form, st.stop, dan st.rerun.</div>", unsafe_allow_html=True)
+    st.markdown("<div class='main-title'>Media Presentasi & Alur Operasional</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sub-title'>Dokumentasi visual pipeline CRISP-DM, audio notifikasi stasiun, video simulasi 24 jam, dan form distribusi.</div>", unsafe_allow_html=True)
 
-    t_med, t_lay, t_ctrl = st.tabs(["Bab 2.6: Multimedia", "Bab 2.7: Layout & Container", "Bab 2.8: Control Flow & Form"])
+    t_med, t_lay, t_ctrl = st.tabs(["Media & Video Simulasi", "Ringkasan Kapasitas", "Form Distribusi Armada"])
 
     with t_med:
         base_dir = Path(__file__).resolve().parent
@@ -770,20 +761,20 @@ def page_riwayat_kesimpulan():
 # NAVIGASI MULTI-PAGE TERSTRUKTUR (st.navigation)
 # ==============================================================================
 pg = st.navigation({
-    "Pengantar & Modul Bab 1–2": [
+    "Pengantar": [
         st.Page(page_beranda, title="Beranda", url_path="beranda", default=True),
-        st.Page(page_bab1_data, title="Bab 1 & 2.1–2.3: Teks & Data", url_path="modul-teks-data"),
-        st.Page(page_bab2_grafik_input, title="Bab 2.4–2.5: Grafik & Input", url_path="modul-grafik-input"),
-        st.Page(page_bab2_media_layout, title="Bab 2.6–2.8: Media & Layout", url_path="modul-media-layout"),
+        st.Page(page_bab1_data, title="Tentang Dataset", url_path="dataset"),
+        st.Page(page_eda, title="Eksplorasi Data (EDA)", url_path="eda"),
     ],
     "Pengolahan & Pemodelan": [
-        st.Page(page_eda, title="Eksplorasi Data (EDA)", url_path="eda"),
         st.Page(page_preprocessing_pca, title="Preprocessing & PCA", url_path="preprocessing-pca"),
         st.Page(page_modelling, title="Modelling & Evaluasi", url_path="modelling"),
     ],
-    "Penerapan & Database": [
+    "Penerapan": [
         st.Page(page_simulasi, title="Simulasi & Prediksi", url_path="simulasi"),
         st.Page(page_batch_csv, title="Prediksi Massal (CSV)", url_path="batch-csv"),
+        st.Page(page_bab2_grafik_input, title="Peta & Panel Armada", url_path="armada"),
+        st.Page(page_bab2_media_layout, title="Media & Form Distribusi", url_path="media-distribusi"),
         st.Page(page_riwayat_kesimpulan, title="Riwayat DB & Kesimpulan", url_path="kesimpulan"),
     ],
 })
