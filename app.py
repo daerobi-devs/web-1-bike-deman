@@ -218,6 +218,45 @@ def train_three_paradigms(df_hash_key: int, _df: pd.DataFrame):
     return trained, pd.DataFrame(metrics_rows), X_test, y_test
 
 
+@st.cache_resource
+def train_optimization_benchmark(df_hash_key: int, _df: pd.DataFrame):
+    """Membandingkan performa HistGradientBoosting sebelum vs sesudah optimasi (log1p + tuning)."""
+    X = _df[FEATURE_COLUMNS]
+    y = _df["count"].astype(float)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    baseline = HistGradientBoostingRegressor(
+        max_iter=50, max_depth=3, learning_rate=0.1, random_state=42
+    )
+    tuned = TransformedTargetRegressor(
+        regressor=HistGradientBoostingRegressor(
+            max_iter=200, max_depth=8, learning_rate=0.08, random_state=42
+        ),
+        func=np.log1p,
+        inverse_func=np.expm1,
+    )
+
+    results = []
+    for label, est in [("Sebelum Optimasi (Baseline)", baseline), ("Sesudah Optimasi (Tuned + Log1p)", tuned)]:
+        t0 = time.perf_counter()
+        est.fit(X_train, y_train)
+        elapsed = round(time.perf_counter() - t0, 2)
+        preds = np.maximum(0, est.predict(X_test))
+        r2 = round(float(r2_score(y_test, preds)), 4)
+        rmse = round(float(np.sqrt(mean_squared_error(y_test, preds))), 2)
+        mae = round(float(mean_absolute_error(y_test, preds)), 2)
+        rmsle = round(float(np.sqrt(np.mean((np.log1p(preds) - np.log1p(np.maximum(0, y_test))) ** 2))), 4)
+        results.append({
+            "Tahap": label,
+            "R2 Score": r2,
+            "RMSE": rmse,
+            "MAE": mae,
+            "RMSLE": rmsle,
+            "Waktu Latih (s)": elapsed,
+        })
+    return pd.DataFrame(results)
+
+
 try:
     df_bike, DATA_SOURCE_LABEL = load_bike_data()
 except Exception as exc:
@@ -552,6 +591,55 @@ def page_preprocessing_pca():
 
 
 # ==============================================================================
+# HALAMAN 7A: TEKNIK OPTIMASI (SEBELUM VS SESUDAH)
+# ==============================================================================
+def page_optimasi():
+    st.markdown("<div class='main-title'>Teknik Optimasi Model (Sebelum vs Sesudah)</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sub-title'>Pembuktian dampak transformasi target log1p dan penyetelan hyperparameter pada HistGradientBoosting.</div>", unsafe_allow_html=True)
+
+    with st.spinner("Menjalankan benchmark sebelum vs sesudah optimasi..."):
+        opt_df = train_optimization_benchmark(len(df_bike), df_bike)
+
+    before = opt_df.iloc[0]
+    after = opt_df.iloc[1]
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("R2 Score (Akurasi)", f"{after['R2 Score']:.4f}", f"+{after['R2 Score'] - before['R2 Score']:.4f} poin")
+    m2.metric("RMSE (Error Unit)", f"{after['RMSE']:.2f}", f"{after['RMSE'] - before['RMSE']:.2f} unit", delta_color="inverse")
+    m3.metric("RMSLE (Log Error)", f"{after['RMSLE']:.4f}", f"{after['RMSLE'] - before['RMSLE']:.4f}", delta_color="inverse")
+
+    t1, t2, t3 = st.tabs(["Hasil Sebelum vs Sesudah", "Skema Parameter Tuning", "Mengapa Optimasi Dibutuhkan?"])
+    with t1:
+        st.dataframe(opt_df, use_container_width=True, hide_index=True)
+        c1, c2 = st.columns(2)
+        with c1:
+            fig_r2 = px.bar(opt_df, x="Tahap", y="R2 Score", color="Tahap", text="R2 Score", title="Kenaikan R2 Score Setelah Optimasi")
+            fig_r2.update_layout(showlegend=False, yaxis_range=[0, 1.1])
+            st.plotly_chart(fig_r2, use_container_width=True)
+        with c2:
+            fig_err = px.bar(opt_df, x="Tahap", y=["RMSE", "MAE"], barmode="group", title="Penurunan Error RMSE & MAE")
+            st.plotly_chart(fig_err, use_container_width=True)
+
+    with t2:
+        st.markdown("#### Perbandingan Konfigurasi Hyperparameter")
+        param_df = pd.DataFrame([
+            ("Transformasi Target", "Tanpa transformasi (raw count)", "np.log1p / np.expm1"),
+            ("max_iter (Jumlah Pohon)", "50", "200"),
+            ("max_depth (Kedalaman)", "3", "8"),
+            ("learning_rate", "0.10", "0.08"),
+        ], columns=["Parameter", "Baseline (Sebelum)", "Optimized (Sesudah)"])
+        st.table(param_df)
+
+    with t3:
+        st.markdown(
+            """
+            1. **Mengatasi Skewness Target:** Target `count` memiliki ekor panjang ke kanan. Dengan `log1p`, model lebih stabil memprediksi jam sepi maupun jam sibuk tanpa menghasilkan nilai negatif.
+            2. **Menangkap Interaksi Kompleks:** Menaikkan `max_depth` dari 3 ke 8 dan `max_iter` ke 200 memungkinkan pohon mempelajari kombinasi spesifik antara jam, musim, hari kerja, dan cuaca.
+            """
+        )
+
+
+# ==============================================================================
 # HALAMAN 7: MODELLING & EVALUASI (3 PARADIGMA)
 # ==============================================================================
 def page_modelling():
@@ -559,20 +647,58 @@ def page_modelling():
     st.markdown("<div class='sub-title'>Benchmark langsung pada 20% data uji antara Paradigma Linear, Berbasis Jarak, dan Berbasis Pohon.</div>", unsafe_allow_html=True)
 
     with st.spinner("Melatih dan mengevaluasi 3 paradigma model..."):
-        _, eval_df, _, _ = train_three_paradigms(len(df_bike), df_bike)
+        trained_models, eval_df, X_test, y_test = train_three_paradigms(len(df_bike), df_bike)
 
-    st.dataframe(eval_df, use_container_width=True, hide_index=True)
+    tab_bench, tab_scatter, tab_resid = st.tabs([
+        "Benchmark 3 Paradigma",
+        "Aktual vs Prediksi (Scatter)",
+        "Distribusi Error (Residual)",
+    ])
 
-    g1, g2 = st.columns(2)
-    with g1:
-        fig_r2 = px.bar(eval_df, x="Model", y="R2 Score", color="Model", text="Skor (%)", title="Perbandingan Akurasi R2 Score (Lebih Tinggi Lebih Baik)")
-        fig_r2.update_layout(showlegend=False, yaxis_range=[0, 1.1])
-        st.plotly_chart(fig_r2, use_container_width=True)
-    with g2:
-        fig_err = px.bar(eval_df, x="Model", y=["RMSE", "MAE"], barmode="group", title="Perbandingan Error RMSE & MAE (Lebih Rendah Lebih Baik)")
-        st.plotly_chart(fig_err, use_container_width=True)
+    with tab_bench:
+        st.dataframe(eval_df, use_container_width=True, hide_index=True)
 
-    st.success("HistGradientBoosting (Paradigma Pohon) unggul signifikan dengan R2 di atas 94% karena mampu menangkap interaksi non-linear jam sibuk dan cuaca.")
+        g1, g2 = st.columns(2)
+        with g1:
+            fig_r2 = px.bar(eval_df, x="Model", y="R2 Score", color="Model", text="Skor (%)", title="Perbandingan Akurasi R2 Score (Lebih Tinggi Lebih Baik)")
+            fig_r2.update_layout(showlegend=False, yaxis_range=[0, 1.1])
+            st.plotly_chart(fig_r2, use_container_width=True)
+        with g2:
+            fig_err = px.bar(eval_df, x="Model", y=["RMSE", "MAE"], barmode="group", title="Perbandingan Error RMSE & MAE (Lebih Rendah Lebih Baik)")
+            st.plotly_chart(fig_err, use_container_width=True)
+
+        st.success("HistGradientBoosting (Paradigma Pohon) unggul signifikan dengan R2 di atas 94% karena mampu menangkap interaksi non-linear jam sibuk dan cuaca.")
+
+    with tab_scatter:
+        st.markdown("#### Seberapa Rapat Tebakan Model ke Garis Ideal (`Aktual == Prediksi`)?")
+        sel_m = st.selectbox("Pilih Model untuk Diinspeksi:", list(trained_models.keys()), index=2, key="scatter_m")
+        preds_m = np.maximum(0, trained_models[sel_m].predict(X_test))
+        sc_df = pd.DataFrame({"Aktual": y_test.to_numpy(), "Prediksi": preds_m}).sample(min(700, len(y_test)), random_state=42)
+        max_axis = float(max(sc_df["Aktual"].max(), sc_df["Prediksi"].max()))
+
+        fig_sc = px.scatter(
+            sc_df, x="Aktual", y="Prediksi", opacity=0.55,
+            title=f"Aktual vs Prediksi — {sel_m} (Sampel 700 Data Uji)",
+        )
+        fig_sc.add_shape(type="line", x0=0, y0=0, x1=max_axis, y1=max_axis, line=dict(color="#dc2626", dash="dash", width=2))
+        fig_sc.update_layout(height=420)
+        st.plotly_chart(fig_sc, use_container_width=True)
+        st.caption("Garis merah putus-putus adalah prediksi sempurna (100% tepat). Semakin rapat titik biru ke garis merah, semakin akurat model.")
+
+    with tab_resid:
+        st.markdown("#### Sebaran Sisa Error (`Aktual - Prediksi`) pada Data Uji")
+        sel_m_res = st.selectbox("Pilih Model untuk Cek Residual:", list(trained_models.keys()), index=2, key="resid_m")
+        preds_r = np.maximum(0, trained_models[sel_m_res].predict(X_test))
+        residuals = y_test.to_numpy() - preds_r
+        fig_res = px.histogram(
+            pd.DataFrame({"Residual (Error Unit)": residuals}),
+            x="Residual (Error Unit)", nbins=50,
+            title=f"Distribusi Residual — {sel_m_res}",
+        )
+        fig_res.add_vline(x=0, line_color="#dc2626", line_dash="dash", line_width=2)
+        fig_res.update_layout(height=400)
+        st.plotly_chart(fig_res, use_container_width=True)
+        st.caption("Model yang sehat memiliki puncak distribusi error yang sempit dan simetris tepat di angka 0.")
 
 
 # ==============================================================================
@@ -768,6 +894,7 @@ pg = st.navigation({
     ],
     "Pengolahan & Pemodelan": [
         st.Page(page_preprocessing_pca, title="Preprocessing & PCA", url_path="preprocessing-pca"),
+        st.Page(page_optimasi, title="Teknik Optimasi", url_path="optimasi"),
         st.Page(page_modelling, title="Modelling & Evaluasi", url_path="modelling"),
     ],
     "Penerapan": [
