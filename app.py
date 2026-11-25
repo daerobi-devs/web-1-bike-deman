@@ -326,7 +326,6 @@ def page_beranda():
             """,
             unsafe_allow_html=True,
         )
-        st.info(f"Sumber Dataset Aktif: {DATA_SOURCE_LABEL}")
 
 
 # ==============================================================================
@@ -356,7 +355,6 @@ def page_bab1_data():
             "dataset": "Capital Bikeshare Washington D.C.",
             "rows": int(len(df_bike)),
             "target": "count (casual + registered)",
-            "data_source": DATA_SOURCE_LABEL,
         })
 
     with t3:
@@ -908,7 +906,6 @@ pg = st.navigation({
 
 with st.sidebar:
     st.divider()
-    st.caption(f"Sumber Data: {DATA_SOURCE_LABEL}")
     st.caption("Kelompok 7 - TI UNPAM")
     st.caption("Daerobi | Hendro | Nasrudin")
 
