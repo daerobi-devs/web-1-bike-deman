@@ -1,70 +1,106 @@
 """
 ===================================================================================
-APLIKASI UTAMA IMPLEMENTASI STREAMLIT BAB 1 & BAB 2
+WEB 1: IMPLEMENTASI STREAMLIT LENGKAP — BIKE SHARING DEMAND
 Mata Kuliah : Machine Learning Terapan (Semester 5)
 Instansi    : Teknik Informatika, Universitas Pamulang (UNPAM)
-Kelompok    : Kelompok 7
-Anggota     : 1. Daerobi
-              2. Hendro Tri Dewanto
-              3. Nasrudin Ali Albana
-Studi Kasus : Analisis & Prediksi Bike Sharing Demand (Time-Series Regression)
+Kelompok    : Kelompok 7 (Daerobi, Hendro Tri Dewanto, Nasrudin Ali Albana)
+Arsitektur  : Grouped Multipage Navigation (st.navigation) + Cloud PostgreSQL & S3
 ===================================================================================
 """
-import streamlit as st
-import pandas as pd
-import numpy as np
 import datetime
-import time
 import os
+import time
+from pathlib import Path
 import altair as alt
+import numpy as np
+import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
+import streamlit as st
+from sklearn.compose import TransformedTargetRegressor
+from sklearn.decomposition import PCA
+from sklearn.ensemble import HistGradientBoostingRegressor
+from sklearn.linear_model import Ridge
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.model_selection import train_test_split
+from sklearn.neighbors import KNeighborsRegressor
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
 try:
-    from daeroom_client import query_db
+    from daeroom_client import get_public_url, query_db, upload_asset
     DAEROOM_AVAILABLE = True
 except Exception:
     DAEROOM_AVAILABLE = False
 
-# Konfigurasi Halaman Streamlit
 st.set_page_config(
-    page_title="Tutorial Streamlit Bab 1-2 | Kelompok 7 UNPAM",
+    page_title="Bike Sharing Demand | Kelompok 7 UNPAM",
     page_icon=None,
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
-# Custom CSS untuk tampilan bersih, elegan, dan ramah mata
-st.markdown("""
+# ==============================================================================
+# CUSTOM CSS (CLEAN SLATE & SKY ACCENT, ZERO EMOJI)
+# ==============================================================================
+st.markdown(
+    """
 <style>
-    /* Styling Dasar */
+    .hero-banner {
+        background: linear-gradient(135deg, #0f172a 0%, #0369a1 100%);
+        color: #f8fafc;
+        padding: 1.75rem 2rem;
+        border-radius: 14px;
+        margin-bottom: 1.25rem;
+        border: 1px solid #0284c7;
+    }
+    .hero-banner h1 {
+        color: #ffffff;
+        font-size: 2.05rem;
+        font-weight: 700;
+        margin: 0 0 0.35rem 0;
+        letter-spacing: -0.02em;
+    }
+    .hero-banner p {
+        color: #e0f2fe;
+        font-size: 1rem;
+        margin: 0;
+    }
     .main-title {
-        font-size: 2.2rem;
+        font-size: 1.85rem;
         font-weight: 700;
         color: #0f172a;
-        margin-bottom: 0.2rem;
+        letter-spacing: -0.02em;
+        margin-bottom: 0.15rem;
     }
     .sub-title {
-        font-size: 1.05rem;
+        font-size: 0.98rem;
         color: #475569;
-        margin-bottom: 1.5rem;
-    }
-    .card {
-        background-color: #f8fafc;
-        border: 1px solid #e2e8f0;
-        border-radius: 8px;
-        padding: 1.25rem;
         margin-bottom: 1.25rem;
     }
-    .card-header {
-        font-size: 1.15rem;
-        font-weight: 600;
-        color: #1e293b;
-        margin-bottom: 0.5rem;
+    .accent-card {
+        background-color: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-left: 4px solid #0284c7;
+        border-radius: 8px;
+        padding: 1.05rem 1.2rem;
+        margin-bottom: 1rem;
     }
-    .badge {
+    .accent-card h4 {
+        margin: 0 0 0.35rem 0;
+        color: #0f172a;
+        font-size: 1.05rem;
+    }
+    .accent-card p {
+        margin: 0;
+        color: #334155;
+        font-size: 0.9rem;
+        line-height: 1.5;
+    }
+    .badge-pill {
         display: inline-block;
-        padding: 0.25rem 0.6rem;
-        font-size: 0.75rem;
+        padding: 0.2rem 0.65rem;
+        font-size: 0.72rem;
         font-weight: 600;
         color: #0369a1;
         background-color: #e0f2fe;
@@ -72,9 +108,28 @@ st.markdown("""
         margin-bottom: 0.5rem;
     }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
-# Fungsi Memuat Dataset (Prioritas Daeroom Cloud PostgreSQL, Fallback CSV Lokal)
+FEATURE_COLUMNS = [
+    "season", "holiday", "workingday", "weather",
+    "temp", "atemp", "humidity", "windspeed",
+    "hour", "dayofweek", "month", "year",
+]
+
+SEASON_LABELS = {1: "Semi (Spring)", 2: "Panas (Summer)", 3: "Gugur (Fall)", 4: "Dingin (Winter)"}
+WEATHER_LABELS = {
+    1: "1 - Cerah / Berawan Ringan",
+    2: "2 - Kabut / Mendung",
+    3: "3 - Hujan Ringan / Gerimis",
+    4: "4 - Hujan Lebat / Badai",
+}
+
+
+# ==============================================================================
+# DATA & MODEL CACHE
+# ==============================================================================
 @st.cache_data(ttl=300)
 def load_bike_data():
     source_label = "CSV Lokal"
@@ -96,751 +151,502 @@ def load_bike_data():
             df = None
 
     if df is None:
-        csv_path = "tugas_streamlit_bab1_bab2/data/bike_sharing.csv"
-        if not os.path.exists(csv_path):
-            csv_path = "data/bike_sharing.csv"
-        if not os.path.exists(csv_path):
-            csv_path = "data/train.csv"
-        df = pd.read_csv(csv_path)
+        base_dir = Path(__file__).resolve().parent
+        for candidate in [
+            base_dir / "data" / "bike_sharing.csv",
+            base_dir / "data" / "train.csv",
+        ]:
+            if candidate.exists():
+                df = pd.read_csv(candidate)
+                break
 
-    df['datetime'] = pd.to_datetime(df['datetime'])
-    df['hour'] = df['datetime'].dt.hour
-    df['day'] = df['datetime'].dt.day_name()
-    df['month'] = df['datetime'].dt.month
-    df['year'] = df['datetime'].dt.year
+    df["datetime"] = pd.to_datetime(df["datetime"])
+    df["hour"] = df["datetime"].dt.hour
+    df["dayofweek"] = df["datetime"].dt.dayofweek
+    df["day"] = df["datetime"].dt.day_name()
+    df["month"] = df["datetime"].dt.month
+    df["year"] = df["datetime"].dt.year
     return df, source_label
+
+
+@st.cache_resource
+def train_three_paradigms(df_hash_key: int, _df: pd.DataFrame):
+    """Melatih 3 paradigma algoritma regresi pada dataset Bike Sharing secara cache."""
+    X = _df[FEATURE_COLUMNS]
+    y = _df["count"].astype(float)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    candidates = {
+        "Ridge Regression (Linear)": TransformedTargetRegressor(
+            regressor=Pipeline([("scaler", StandardScaler()), ("m", Ridge(alpha=1.0))]),
+            func=np.log1p, inverse_func=np.expm1,
+        ),
+        "K-Nearest Neighbors (k=7)": TransformedTargetRegressor(
+            regressor=Pipeline([("scaler", StandardScaler()), ("m", KNeighborsRegressor(n_neighbors=7, weights="distance"))]),
+            func=np.log1p, inverse_func=np.expm1,
+        ),
+        "HistGradientBoosting (Tree)": TransformedTargetRegressor(
+            regressor=HistGradientBoostingRegressor(max_iter=200, max_depth=8, learning_rate=0.08, random_state=42),
+            func=np.log1p, inverse_func=np.expm1,
+        ),
+    }
+
+    trained = {}
+    metrics_rows = []
+    for name, est in candidates.items():
+        t0 = time.perf_counter()
+        est.fit(X_train, y_train)
+        train_s = round(time.perf_counter() - t0, 2)
+
+        preds = np.maximum(0, est.predict(X_test))
+        r2 = round(float(r2_score(y_test, preds)), 4)
+        rmse = round(float(np.sqrt(mean_squared_error(y_test, preds))), 2)
+        mae = round(float(mean_absolute_error(y_test, preds)), 2)
+        rmsle = round(float(np.sqrt(np.mean((np.log1p(preds) - np.log1p(np.maximum(0, y_test))) ** 2))), 4)
+
+        trained[name] = est
+        metrics_rows.append({
+            "Model": name,
+            "R2 Score": r2,
+            "Skor (%)": f"{r2*100:.2f}%",
+            "RMSE": rmse,
+            "MAE": mae,
+            "RMSLE": rmsle,
+            "Waktu Latih (s)": train_s,
+        })
+
+    return trained, pd.DataFrame(metrics_rows), X_test, y_test
+
 
 try:
     df_bike, DATA_SOURCE_LABEL = load_bike_data()
-except Exception as e:
-    st.error(f"Gagal memuat dataset: {e}")
-    df_bike = pd.DataFrame()
-    DATA_SOURCE_LABEL = "Tidak Tersedia"
-
-# Sidebar Navigasi Utama
-st.sidebar.markdown("<div class='badge'>TUGAS MACHINE LEARNING</div>", unsafe_allow_html=True)
-st.sidebar.title("Tutorial Streamlit")
-st.sidebar.markdown("**Implementasi Modul Bab 1 & Bab 2**")
-st.sidebar.caption("Kelompok 7 - Teknik Informatika UNPAM")
-
-menu_options = [
-    "1. Beranda & Pengenalan (Bab 1)",
-    "2. Dasar Streamlit & Elemen Text (Bab 2.1 & 2.2)",
-    "3. Menampilkan Data & Metrik KPI (Bab 2.3)",
-    "4. Visualisasi Grafik & Peta (Bab 2.4)",
-    "5. Form Input & Komponen Interaktif (Bab 2.5)",
-    "6. Tampilan Media Multimedia (Bab 2.6)",
-    "7. Layout, Columns & Containers (Bab 2.7)",
-    "8. Control Flow & Form Batching (Bab 2.8)",
-    "9. Showcase Terpadu: Simulator Bike Sharing"
-]
-
-selected_menu = st.sidebar.radio("Pilih Modul Pembelajaran:", menu_options)
-
-st.sidebar.divider()
-st.sidebar.caption(f"Sumber Data: {DATA_SOURCE_LABEL}")
-st.sidebar.markdown("### Tim Penyusun (Kelompok 7)")
-st.sidebar.markdown("""
-- **Daerobi** (Ketua / Model & UI)
-- **Hendro Tri Dewanto** (Data Pipeline)
-- **Nasrudin Ali Albana** (Evaluasi & Laporan)
-""")
-st.sidebar.caption("Dosen Pengampu: Farizi Ilham S.Kom., M.Kom.")
+except Exception as exc:
+    st.error(f"Gagal memuat dataset: {exc}")
+    st.stop()
 
 
 # ==============================================================================
-# MODUL 1: BERANDA & PENGENALAN (BAB 1)
+# HALAMAN 1: BERANDA
 # ==============================================================================
-if selected_menu == "1. Beranda & Pengenalan (Bab 1)":
-    st.markdown("<h1 class='main-title'>Bab 1: Pengenalan Framework Web Streamlit</h1>", unsafe_allow_html=True)
-    st.markdown("<p class='sub-title'>Tutorial Praktik Instalasi, Persiapan Virtual Environment, dan Pembuatan Aplikasi Web Pertama</p>", unsafe_allow_html=True)
-
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        st.markdown("""
-        ### 1.1 Tentang Framework Streamlit
-        Streamlit adalah framework Python open-source yang dirancang khusus untuk mempermudah ilmuwan data (Data Scientists) 
-        dan pengembang kecerdasan buatan dalam membagikan model machine learning ke dalam antarmuka web interaktif yang elegan.
-        
-        **Keunggulan Utama Streamlit vs Framework Tradisional (Flask / Django):**
-        1. **Murni Bahasa Python**: Tidak memerlukan penulisan file HTML, CSS, JavaScript, atau routing WSGI yang rumit.
-        2. **Siklus Pengembangan Instan**: Waktu pembuatan aplikasi berubah dari berminggu-minggu menjadi hanya beberapa jam.
-        3. **Reactivity Bawaan**: Setiap perubahan input pengguna secara otomatis memperbarui antarmuka pengguna secara mulus.
-        4. **Integrasi Ekosistem Data Terpadu**: Kompatibel penuh dengan Pandas, NumPy, Scikit-Learn, Matplotlib, Plotly, dan Altair.
-        """)
-    
-    with col2:
-        st.markdown("""
-        <div class='card'>
-            <div class='card-header'>Informasi Studi Kasus</div>
-            <p><strong>Dataset:</strong> Bike Sharing Demand</p>
-            <p><strong>Lokasi:</strong> Washington D.C.</p>
-            <p><strong>Total Observasi:</strong> 10,886 baris</p>
-            <p><strong>Variabel Target:</strong> count (total peminjaman)</p>
-            <p><strong>Kelompok:</strong> Kelompok 7 (UNPAM)</p>
+def page_beranda():
+    st.markdown(
+        """
+        <div class="hero-banner">
+            <h1>Analisis & Prediksi Bike Sharing Demand</h1>
+            <p>Implementasi Terpadu Modul Streamlit (Bab 1 & Bab 2) hingga Pemodelan 3 Paradigma Machine Learning — Kelompok 7 UNPAM</p>
         </div>
-        """, unsafe_allow_html=True)
-
-    st.divider()
-    st.markdown("### 1.2 Prosedur Instalasi & Setup Environment")
-    
-    st.markdown("""
-    Berikut adalah tahapan teknis persiapan lingkungan kerja Python untuk menjalankan Streamlit sesuai standar laboratorium:
-    """)
-
-    step_tab1, step_tab2, step_tab3 = st.tabs(["1. Virtual Environment", "2. Instalasi Paket Pip", "3. Menjalankan Server"])
-
-    with step_tab1:
-        st.markdown("**Langkah 1: Membuat & Mengaktifkan Virtual Environment di Command Prompt / PowerShell**")
-        st.code("""# 1. Buka Command Prompt atau PowerShell di folder proyek
-cd "c:\\Users\\ADVAN\\Documents\\antigravity\\magical-faraday\\tugas_streamlit_bab1_bab2"
-
-# 2. Buat virtual environment bernama 'env'
-python -m venv env
-
-# 3. Aktifkan virtual environment pada Windows
-env\\Scripts\\activate
-""", language="powershell")
-
-    with step_tab2:
-        st.markdown("**Langkah 2: Instalasi Pustaka Utama yang Dibutuhkan**")
-        st.code("""# Memperbarui pip installer
-python -m pip install --upgrade pip
-
-# Menginstal Streamlit dan pustaka data science
-pip install streamlit pandas numpy scikit-learn matplotlib plotly altair
-
-# Memeriksa daftar paket yang telah berhasil terpasang
-pip list
-""", language="powershell")
-
-    with step_tab3:
-        st.markdown("**Langkah 3: Perintah Eksekusi Aplikasi Pertama**")
-        st.code("""# Menjalankan berkas utama aplikasi Streamlit
-streamlit run app.py
-
-# Aplikasi akan otomatis terbuka pada peramban web:
-# Local URL: http://localhost:8501
-# Network URL: http://192.168.x.x:8501
-""", language="powershell")
-
-    st.divider()
-    st.markdown("### 1.3 Kode Aplikasi Pertama (`main.py`)")
-    st.code("""import streamlit as st
-
-st.title("Aplikasi Pemantauan Bike Sharing Demand")
-st.write("Selamat datang di sistem analitik operasional armada sepeda Kelompok 7!")
-""", language="python")
-    st.success("Bab 1 berhasil dipraktekkan secara tuntas. Silakan beralih ke sub-bab berikutnya pada panel sidebar kiri.")
-
-
-# ==============================================================================
-# MODUL 2: DASAR STREAMLIT & ELEMEN TEXT (BAB 2.1 & 2.2)
-# ==============================================================================
-elif selected_menu == "2. Dasar Streamlit & Elemen Text (Bab 2.1 & 2.2)":
-    st.markdown("<h1 class='main-title'>Bab 2.1 & 2.2: Dasar Streamlit dan Elemen Teks</h1>", unsafe_allow_html=True)
-    st.markdown("<p class='sub-title'>Implementasi fungsi cetak serbaguna st.write() serta variasi tipografi teks dan ekspresi matematika</p>", unsafe_allow_html=True)
-
-    tab_dasar, tab_text = st.tabs(["Praktik 2.1: Dasar st.write()", "Praktik 2.2: Elemen Teks & LaTeX"])
-
-    with tab_dasar:
-        st.markdown("### 2.1 Penerapan Multi-Tipe Argumen dengan `st.write()`")
-        st.write("Fungsi `st.write()` adalah fungsi 'Swiss-Army Knife' di Streamlit yang otomatis mengenali format string, angka, data tabular, chart, maupun dictionary.")
-        
-        col_w1, col_w2 = st.columns(2)
-        with col_w1:
-            st.markdown("#### Input Teks & Numerik")
-            st.write("Pesan Sistem: Status operasional bike sharing terpantau stabil.")
-            st.write("Jumlah Total Observasi Historis:", 10886)
-            st.write("Kombinasi String & Variabel Numerik: Rata-rata sewa per jam adalah", 191.57, "unit sepeda.")
-        
-        with col_w2:
-            st.markdown("#### Input Dictionary Objek (JSON-like)")
-            st.write({
-                "cluster_region": "Washington D.C. Metropolitan",
-                "total_active_stations": 42,
-                "fleet_size": 2500,
-                "primary_algorithm": "HistGradientBoostingRegressor",
-                "validation_rmsle": 0.2581
-            })
-        
-        st.markdown("#### Menampilkan DataFrame dengan `st.write()`")
-        st.write(df_bike[['datetime', 'season', 'temp', 'humidity', 'count']].head(4))
-
-    with tab_text:
-        st.markdown("### 2.2 Elemen Tipografi Teks & Format Formula")
-        
-        st.title("Contoh st.title(): Judul Utama Halaman")
-        st.header("Contoh st.header(): Header Bagian Dokumen")
-        st.subheader("Contoh st.subheader(): Subheader Spesifik")
-        st.caption("Contoh st.caption(): Keterangan tambahan atau catatan kaki dengan ukuran font kecil.")
-        
-        st.divider()
-        st.markdown("""
-        #### Contoh `st.markdown()` dengan Format Teks dan Warna
-        Fitur lingkungan operasional:
-        - :blue[Suhu Udara (temp)]: Mengukur suhu termal aktual dalam skala Celcius.
-        - :green[Kelembaban (humidity)]: Tingkat kelembaban udara relatif.
-        - :red[Kecepatan Angin (windspeed)]: Menentukan faktor resistensi hembusan angin bersepeda.
-        - Formula Penjumlahan Rental: $\\text{count} = \\text{casual} + \\text{registered}$
-        """)
-
-        st.divider()
-        st.markdown("#### Contoh `st.text()` (Teks Monospaced Polos)")
-        st.text("LOG_BUFFER: 2026-11-10 16:00:00 UTC | Ingestion telemetri sensor sepeda: STATUS_OK")
-
-        st.markdown("#### Contoh `st.code()` (Blok Kode Program Python)")
-        st.code("""def extract_bike_features(df):
-    df['datetime'] = pd.to_datetime(df['datetime'])
-    df['hour'] = df['datetime'].dt.hour
-    df['is_weekend'] = df['datetime'].dt.dayofweek.isin([5, 6]).astype(int)
-    return df
-""", language="python")
-
-        st.markdown("#### Contoh `st.latex()` (Formula Matematika Akademik)")
-        st.latex(r"\text{RMSLE} = \sqrt{\frac{1}{n} \sum_{i=1}^n \left( \ln(\hat{y}_i + 1) - \ln(y_i + 1) \right)^2}")
-        st.caption("Fungsi kerugian RMSLE menjamin model tidak menghasilkan penalti eksponensial terhadap fluktuasi volume sewa yang besar.")
-
-
-# ==============================================================================
-# MODUL 3: MENAMPILKAN DATA & METRIK KPI (BAB 2.3)
-# ==============================================================================
-elif selected_menu == "3. Menampilkan Data & Metrik KPI (Bab 2.3)":
-    st.markdown("<h1 class='main-title'>Bab 2.3: Menampilkan Data dan Metrik</h1>", unsafe_allow_html=True)
-    st.markdown("<p class='sub-title'>Implementasi st.dataframe, st.table, st.metric, dan st.json pada data Bike Sharing Demand</p>", unsafe_allow_html=True)
-
-    st.markdown("### 1. Panel Metrik Kinerja Utama (`st.metric`)")
-    m_col1, m_col2, m_col3, m_col4 = st.columns(4)
-    
-    tot_count = int(df_bike['count'].sum())
-    avg_temp = round(df_bike['temp'].mean(), 1)
-    tot_reg = int(df_bike['registered'].sum())
-    tot_cas = int(df_bike['casual'].sum())
-    reg_pct = round((tot_reg / tot_count) * 100, 1)
-
-    with m_col1:
-        st.metric(label="Total Sewa Sepeda", value=f"{tot_count:,}", delta="+14.2% YoY")
-    with m_col2:
-        st.metric(label="Rata-rata Suhu", value=f"{avg_temp} °C", delta="+1.5 °C")
-    with m_col3:
-        st.metric(label="Proporsi Komuter", value=f"{reg_pct} %", delta="+3.1%")
-    with m_col4:
-        st.metric(label="Penyewa Rekreasi", value=f"{tot_cas:,}", delta="-1.8%")
-
-    st.divider()
-    st.markdown("### 2. Tabel Interaktif (`st.dataframe`) vs Tabel Statis (`st.table`)")
-    
-    col_d1, col_d2 = st.columns([3, 2])
-    with col_d1:
-        st.markdown("#### Tabel Interaktif (`st.dataframe`)")
-        st.caption("Dapat digulir, diurutkan, difilter, dan diubah lebar kolomnya oleh pengguna.")
-        st.dataframe(df_bike[['datetime', 'season', 'weather', 'temp', 'humidity', 'windspeed', 'count']].head(8), use_container_width=True)
-
-    with col_d2:
-        st.markdown("#### Tabel Statis Ringkasan (`st.table`)")
-        st.caption("Rata-rata nilai fitur berdasarkan 4 musim.")
-        season_summary = df_bike.groupby('season')[['temp', 'humidity', 'windspeed', 'count']].mean().round(2)
-        season_summary.index = ["1: Spring", "2: Summer", "3: Fall", "4: Winter"]
-        st.table(season_summary)
-
-    st.divider()
-    st.markdown("### 3. Metadata Konfigurasi Stasiun Sepeda (`st.json`)")
-    station_json = {
-        "network_authority": "Capital Bikeshare D.C.",
-        "station_id": "DC-ST-007",
-        "station_name": "Smithsonian National Air and Space Museum",
-        "coordinates": {"latitude": 38.8882, "longitude": -77.0199},
-        "docks": {"total_capacity": 48, "active_ebike_chargers": 16},
-        "iot_sensors": {
-            "temperature_celsius": 22.4,
-            "humidity_percent": 61.0,
-            "signal_rssi_dbm": -68,
-            "telemetry_health": "Optimal"
-        }
-    }
-    st.json(station_json)
-
-
-# ==============================================================================
-# MODUL 4: VISUALISASI GRAFIK & PETA (BAB 2.4)
-# ==============================================================================
-elif selected_menu == "4. Visualisasi Grafik & Peta (Bab 2.4)":
-    st.markdown("<h1 class='main-title'>Bab 2.4: Menampilkan Grafik dan Peta Geografis</h1>", unsafe_allow_html=True)
-    st.markdown("<p class='sub-title'>Visualisasi garis, area, batang, scatter plot Altair/Plotly, dan peta stasiun sepeda D.C.</p>", unsafe_allow_html=True)
-
-    tab_native, tab_advanced, tab_map = st.tabs(["1. Grafik Native Streamlit", "2. Altair, Vega-Lite & Plotly", "3. Peta Geografis (st.map)"])
-
-    with tab_native:
-        st.markdown("### Grafik Garis, Area, dan Batang Bawaan Streamlit")
-        
-        # Agregasi data per jam
-        hourly_grp = df_bike.groupby('hour')[['count', 'registered', 'casual']].mean()
-
-        g_col1, g_col2 = st.columns(2)
-        with g_col1:
-            st.markdown("#### Grafik Garis Tren Sewa 24 Jam (`st.line_chart`)")
-            st.caption("Terlihat lonjakan bimodal komuter pada jam kerja (08:00 dan 17:00).")
-            st.line_chart(hourly_grp['count'])
-
-        with g_col2:
-            st.markdown("#### Grafik Area Komposisi Pengguna (`st.area_chart`)")
-            st.caption("Porsi pengguna terdaftar (biru) mendominasi jam sibuk.")
-            st.area_chart(hourly_grp[['registered', 'casual']])
-
-        st.markdown("#### Grafik Batang Volume Antar Musim (`st.bar_chart`)")
-        season_names = {1: "Spring", 2: "Summer", 3: "Fall", 4: "Winter"}
-        df_season_chart = df_bike.copy()
-        df_season_chart['season_label'] = df_season_chart['season'].map(season_names)
-        season_tot = df_season_chart.groupby('season_label')['count'].sum().reindex(["Spring", "Summer", "Fall", "Winter"])
-        st.bar_chart(season_tot)
-
-    with tab_advanced:
-        st.markdown("### Grafik Interaktif Altair, Vega-Lite & Plotly")
-        sample_viz = df_bike.sample(250, random_state=42)
-
-        c_alt, c_plotly = st.columns(2)
-        with c_alt:
-            st.markdown("#### Scatter Plot Interaktif Altair (`st.altair_chart`)")
-            chart_alt = alt.Chart(sample_viz).mark_circle(size=70).encode(
-                x=alt.X('temp:Q', title='Suhu Udara (°C)'),
-                y=alt.Y('count:Q', title='Total Rental (count)'),
-                color=alt.Color('weather:N', title='Cuaca', scale=alt.Scale(scheme='category10')),
-                tooltip=['temp', 'humidity', 'windspeed', 'count']
-            ).properties(height=340).interactive()
-            st.altair_chart(chart_alt, use_container_width=True)
-
-        with c_plotly:
-            st.markdown("#### Scatter Interaktif Plotly Express (`st.plotly_chart`)")
-            fig_p = px.scatter(
-                sample_viz,
-                x="atemp",
-                y="count",
-                color="season",
-                size="humidity",
-                hover_data=["windspeed", "casual", "registered"],
-                labels={"atemp": "Suhu Terasa (°C)", "count": "Jumlah Sewa"},
-                title="Plotly: Suhu Terasa vs Jumlah Rental Sepeda"
-            )
-            fig_p.update_layout(height=340, margin=dict(l=20, r=20, t=40, b=20))
-            st.plotly_chart(fig_p, use_container_width=True)
-
-        st.markdown("#### Visualisasi Deklaratif Vega-Lite (`st.vega_lite_chart`)")
-        vega_spec = {
-            "mark": {"type": "circle", "opacity": 0.7},
-            "encoding": {
-                "x": {"field": "humidity", "type": "quantitative", "title": "Kelembaban (%)"},
-                "y": {"field": "windspeed", "type": "quantitative", "title": "Kecepatan Angin (km/h)"},
-                "color": {"field": "temp", "type": "quantitative", "title": "Suhu (°C)"},
-                "size": {"field": "count", "type": "quantitative", "title": "Rental"}
-            }
-        }
-        st.vega_lite_chart(sample_viz, vega_spec, use_container_width=True)
-
-    with tab_map:
-        st.markdown("### Peta Persebaran Stasiun Sepeda Capital Bikeshare (`st.map`)")
-        st.caption("Peta interaktif berbasis koordinat latitude dan longitude stasiun sepeda di Washington D.C.")
-        dc_stations = pd.DataFrame({
-            'station_name': [
-                'Lincoln Memorial', 'National Mall East', 'Dupont Circle Metro',
-                'Georgetown Waterfront', 'Union Station Metro', 'Smithsonian Air & Space',
-                'Capitol South Metro', 'Adams Morgan 18th St', 'Navy Yard Station', 'Foggy Bottom GWU',
-                'Thomas Circle NW', 'Eastern Market Metro'
-            ],
-            'lat': [
-                38.8893, 38.8897, 38.9096, 38.9030, 38.8978, 38.8882,
-                38.8856, 38.9217, 38.8765, 38.9009, 38.9058, 38.8841
-            ],
-            'lon': [
-                -77.0502, -77.0229, -77.0434, -77.0620, -77.0063, -77.0199,
-                -77.0051, -77.0423, -77.0003, -77.0503, -77.0320, -76.9954
-            ],
-            'capacity': [45, 35, 40, 30, 60, 48, 38, 28, 44, 36, 32, 26]
-        })
-        st.map(dc_stations[['lat', 'lon']], zoom=12)
-        st.dataframe(dc_stations, use_container_width=True)
-
-
-# ==============================================================================
-# MODUL 5: FORM INPUT & KOMPONEN INTERAKTIF (BAB 2.5)
-# ==============================================================================
-elif selected_menu == "5. Form Input & Komponen Interaktif (Bab 2.5)":
-    st.markdown("<h1 class='main-title'>Bab 2.5: Menampilkan Input Form & Widget Kontrol</h1>", unsafe_allow_html=True)
-    st.markdown("<p class='sub-title'>Eksplorasi lengkap seluruh widget input Streamlit untuk parameter simulasi sepeda</p>", unsafe_allow_html=True)
-
-    # 1. Button & Data Editor
-    st.markdown("### 1. Tombol Aksi (`st.button`) & Editor Data Interaktif (`st.data_editor`)")
-    col_b1, col_b2 = st.columns([1, 2])
-    with col_b1:
-        st.markdown("#### Trigger Aksi")
-        if st.button("Jalankan Audit Kapasitas Stasiun"):
-            st.success("Semua stasiun terverifikasi dalam batas toleransi aman.")
-        
-        st.markdown("#### Unduh Konfigurasi (`st.download_button`)")
-        sample_download = pd.DataFrame({
-            "stasiun": ["Dupont Circle", "Union Station", "Lincoln Memorial"],
-            "target_alokasi": [40, 60, 45],
-            "buffer_ebike": [10, 15, 12]
-        })
-        st.download_button(
-            label="Unduh CSV Konfigurasi",
-            data=sample_download.to_csv(index=False).encode('utf-8'),
-            file_name="konfigurasi_stasiun.csv",
-            mime="text/csv"
-        )
-
-    with col_b2:
-        st.markdown("#### Editor Data Tabular Dinamis (`st.data_editor`)")
-        st.caption("Nilai tabel di bawah dapat diedit langsung oleh pengguna di browser:")
-        editor_df = pd.DataFrame([
-            {"Stasiun": "Lincoln Memorial", "Docks": 45, "Sepeda": 28, "Siap Pakai": True},
-            {"Stasiun": "Dupont Circle", "Docks": 40, "Sepeda": 18, "Siap Pakai": True},
-            {"Stasiun": "Union Station", "Docks": 60, "Sepeda": 54, "Siap Pakai": True},
-            {"Stasiun": "Georgetown", "Docks": 30, "Sepeda": 6, "Siap Pakai": False}
-        ])
-        edited_result = st.data_editor(editor_df, num_rows="dynamic", use_container_width=True)
-
-    st.divider()
-
-    # 2. Checkbox, Radio, Selectbox, Multiselect
-    st.markdown("### 2. Seleksi Opsi: Checkbox, Radio, Selectbox & Multiselect")
-    col_o1, col_o2, col_o3 = st.columns(3)
-
-    with col_o1:
-        st.markdown("#### Checkbox & Radio")
-        check_holiday = st.checkbox("Sertakan Hari Libur Nasional (holiday)", value=False)
-        fleet_select = st.radio("Pilihan Armada:", ["Sepeda Standar", "E-Bike Listrik", "Kargo"])
-        st.write(f"Libur: `{check_holiday}`, Armada: `{fleet_select}`")
-
-    with col_o2:
-        st.markdown("#### Selectbox (Dropdown)")
-        weather_opt = st.selectbox(
-            "Kondisi Cuaca Lingkungan:",
-            ["1: Cerah / Sedikit Berawan", "2: Berkabut / Berawan Tebal", "3: Gerimis / Salju Ringan", "4: Hujan Badai Ekstrem"]
-        )
-        st.write(f"Pilihan Cuaca: `{weather_opt}`")
-
-    with col_o3:
-        st.markdown("#### Multiselect")
-        season_multi = st.multiselect(
-            "Musim Pengamatan:",
-            ["Spring", "Summer", "Fall", "Winter"],
-            default=["Summer", "Fall"]
-        )
-        st.write(f"Musim Terpilih: `{season_multi}`")
-
-    st.divider()
-
-    # 3. Slider & Select Slider
-    st.markdown("### 3. Slider Numerik (`st.slider`) & Slider Pilihan (`st.select_slider`)")
-    col_sl1, col_sl2 = st.columns(2)
-    with col_sl1:
-        jam_slider = st.slider("Pilih Jam Operasional (0 - 23 WIB):", min_value=0, max_value=23, value=8)
-        rentang_suhu = st.slider("Rentang Suhu Operasional (°C):", min_value=0.0, max_value=45.0, value=(15.0, 30.0))
-        st.write(f"Jam: `{jam_slider}:00`, Rentang Suhu: `{rentang_suhu[0]}°C - {rentang_suhu[1]}°C`")
-
-    with col_sl2:
-        tingkat_urgensi = st.select_slider(
-            "Level Urgensi Rebalancing Armada:",
-            options=["Normal", "Siaga 1", "Siaga 2", "Darurat Rebalancing (Starvation Risk)"],
-            value="Siaga 1"
-        )
-        st.write(f"Level Urgensi: `{tingkat_urgensi}`")
-
-    st.divider()
-
-    # 4. Inputs: Text, Number, Text Area, Date, Time, File, Camera, Color
-    st.markdown("### 4. Input Teks, Angka, Tanggal, Jam, Berkas & Kamera")
-    col_in1, col_in2, col_in3 = st.columns(3)
-
-    with col_in1:
-        st.markdown("#### Input Teks & Angka")
-        operator_nama = st.text_input("Nama Petugas Dispatcher:", "Daerobi (Kelompok 7)")
-        truk_count = st.number_input("Jumlah Unit Truk:", min_value=1, max_value=20, value=4, step=1)
-        st.write(f"Petugas: `{operator_nama}`, Truk: `{truk_count}`")
-
-        catatan = st.text_area("Instruksi Khusus Lapangan:", "Fokuskan dropping sepeda di stasiun universitas.")
-
-    with col_in2:
-        st.markdown("#### Pemilih Tanggal & Waktu")
-        tgl_dispatch = st.date_input("Tanggal Operasi:", datetime.date(2026, 11, 10))
-        jam_dispatch = st.time_input("Waktu Mulai Truk:", datetime.time(6, 45))
-        st.write(f"Jadwal: `{tgl_dispatch} pukul {jam_dispatch}`")
-
-        warna_tema = st.color_picker("Pilih Warna Aksen UI:", "#0369a1")
-        st.write(f"Warna: `{warna_tema}`")
-
-    with col_in3:
-        st.markdown("#### Berkas & Kamera")
-        up_file = st.file_uploader("Unggah CSV Log Sensor:", type=["csv"])
-        if up_file is not None:
-            st.success(f"File `{up_file.name}` siap diproses.")
-
-        cam_pic = st.camera_input("Ambil Foto Inspeksi Sepeda / QR Code:")
-        if cam_pic:
-            st.image(cam_pic, caption="Foto Inspeksi Teknis Terambil", use_container_width=True)
-
-
-# ==============================================================================
-# MODUL 6: TAMPILAN MEDIA MULTIMEDIA (BAB 2.6)
-# ==============================================================================
-elif selected_menu == "6. Tampilan Media Multimedia (Bab 2.6)":
-    st.markdown("<h1 class='main-title'>Bab 2.6: Menampilkan Media Multimedia</h1>", unsafe_allow_html=True)
-    st.markdown("<p class='sub-title'>Implementasi pemutar gambar st.image, audio st.audio, dan video st.video pada Streamlit</p>", unsafe_allow_html=True)
-
-    col_med1, col_med2 = st.columns(2)
-
-    with col_med1:
-        st.markdown("### 1. Menampilkan Gambar (`st.image`)")
-        st.caption("Diagram Alur Metodologi CRISP-DM Bike Sharing Demand Kelompok 7:")
-        img_crisp = "tugas_streamlit_bab1_bab2/assets/crisp_dm_pipeline.png"
-        if os.path.exists(img_crisp):
-            st.image(img_crisp, caption="Arsitektur Pipeline Machine Learning Bike Sharing", use_container_width=True)
-        else:
-            st.info("File gambar placeholder tersedia di direktori assets.")
-
-    with col_med2:
-        st.markdown("### 2. Menampilkan Pemutar Audio (`st.audio`)")
-        st.caption("Audio alert / bel stasiun sepeda saat dock stasiun telah terisi penuh:")
-        audio_chime = "tugas_streamlit_bab1_bab2/assets/station_chime.wav"
-        if os.path.exists(audio_chime):
-            st.audio(audio_chime, format="audio/wav")
-        else:
-            st.info("Berkas audio station_chime.wav siap diputar.")
-
-        st.divider()
-        st.markdown("### 3. Menampilkan Pemutar Video (`st.video`)")
-        st.caption("Animasi simulasi pola penyewaan sepeda 24 jam (Cloud Object Storage):")
-        s3_video_url = "https://s3.daeroom.my.id/bikesharingdemand-assets/media/bike_sharing_demo.mp4"
-        st.video(s3_video_url)
-
-
-# ==============================================================================
-# MODUL 7: LAYOUT, COLUMNS & CONTAINERS (BAB 2.7)
-# ==============================================================================
-elif selected_menu == "7. Layout, Columns & Containers (Bab 2.7)":
-    st.markdown("<h1 class='main-title'>Bab 2.7: Menampilkan Layout dan Container</h1>", unsafe_allow_html=True)
-    st.markdown("<p class='sub-title'>Penerapan sidebar, columns, tabs, expander, container, dan placeholder dinamis empty</p>", unsafe_allow_html=True)
-
-    st.markdown("### 1. Multi-Kolom Responsif (`st.columns`)")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Kapasitas Rata-rata Dock", "42 unit", "+4 unit")
-    c2.metric("Tingkat Utilitas Harian", "78.4 %", "+6.2 %")
-    c3.metric("Waktu Perbaikan Rusak", "1.8 jam", "-0.4 jam")
-
-    st.divider()
-
-    st.markdown("### 2. Navigasi Multi-Tab (`st.tabs`)")
-    t1, t2, t3 = st.tabs(["Ringkasan Data Cuaca", "Jadwal Rebalancing Truk", "Kamus Data"])
-
-    with t1:
-        st.write("Statistik agregat pengaruh cuaca terhadap total peminjaman:")
-        weather_summary = df_bike.groupby('weather')[['temp', 'humidity', 'count']].mean().round(2)
-        weather_summary.index = ["Cerah", "Mendung", "Hujan Ringan", "Cuaca Ekstrem"]
-        st.dataframe(weather_summary, use_container_width=True)
-
-    with t2:
-        st.write("Jadwal distribusi truk rebalancing ke halte tujuan:")
-        truk_df = pd.DataFrame({
-            "No Truk": ["TRK-01", "TRK-02", "TRK-03", "TRK-04"],
-            "Rute Stasiun": ["Dupont Circle", "Union Station", "Foggy Bottom", "Georgetown"],
-            "Jumlah Sepeda Diangkut": [25, 30, 20, 15],
-            "Jam Keberangkatan": ["06:30", "07:00", "15:30", "16:00"]
-        })
-        st.table(truk_df)
-
-    with t3:
-        st.markdown("""
-        - **season**: 1=Spring, 2=Summer, 3=Fall, 4=Winter
-        - **workingday**: 1=Hari kerja (Senin-Jumat), 0=Akhir pekan/libur
-        - **weather**: Kategori kondisi cuaca skala 1 hingga 4
-        - **temp / atemp**: Suhu udara aktual dan suhu terasa (°C)
-        - **count**: Total peminjaman sepeda per jam
-        """)
-
-    st.divider()
-
-    st.markdown("### 3. Wadah Buka-Tutup (`st.expander`)")
-    with st.expander("Klik untuk Menampilkan Formula Matematis Evaluasi Model"):
-        st.latex(r"\text{Loss Function: } \mathcal{L} = \frac{1}{2} \sum_{i=1}^n (y_i - \hat{y}_i)^2 + \lambda \|\mathbf{w}\|_2^2")
-        st.write("Model regresi menerapkan regularisasi L2 guna memitigasi risiko overfitting data musiman.")
-
-    st.divider()
-
-    col_box1, col_box2 = st.columns(2)
-    with col_box1:
-        st.markdown("### 4. Wadah Elemen (`st.container`)")
-        with st.container():
-            st.info("Kontainer ini memuat peringatan otomatis telemetri:")
-            st.warning("Stasiun Dupont Circle mendekati batas minimum sepeda tersedia (tersisa 3 unit).")
-
-    with col_box2:
-        st.markdown("### 5. Wadah Dinamis Placeholder (`st.empty`)")
-        st.caption("Mendemonstrasikan update konten waktu nyata tanpa me-refresh seluruh halaman:")
-        empty_placeholder = st.empty()
-        
-        if st.button("Uji Simulasi Loading Telemetri Sensor"):
-            for s in range(3, 0, -1):
-                empty_placeholder.warning(f"Menyinkronkan sinyal sensor... {s} detik")
-                time.sleep(1)
-            empty_placeholder.success("Sinkronisasi Selesai! Semua 42 stasiun terhubung (Status 200 OK).")
-
-
-# ==============================================================================
-# MODUL 8: CONTROL FLOW & FORM BATCHING (BAB 2.8)
-# ==============================================================================
-elif selected_menu == "8. Control Flow & Form Batching (Bab 2.8)":
-    st.markdown("<h1 class='main-title'>Bab 2.8: Menampilkan Control Flow & Form Batching</h1>", unsafe_allow_html=True)
-    st.markdown("<p class='sub-title'>Penerapan st.stop() untuk validasi, st.form() untuk batch execution, dan st.rerun()</p>", unsafe_allow_html=True)
-
-    # 1. st.stop()
-    st.markdown("### 1. Penghentian Alur Kerja dengan Validasi (`st.stop`)")
-    server_status = st.selectbox(
-        "Simulasikan Status Gateway Server API:",
-        ["Online (200 OK)", "Gateway Timeout (504)", "Maintenance System (503)"]
+        """,
+        unsafe_allow_html=True,
     )
 
-    if server_status == "Gateway Timeout (504)":
-        st.error("Koneksi gagal: Gateway Timeout 504. Alur eksekusi aplikasi dihentikan oleh st.stop().")
-        st.stop()
-    elif server_status == "Maintenance System (503)":
-        st.warning("Server sedang dalam jadwal pemeliharaan. Alur eksekusi dihentikan oleh st.stop().")
-        st.stop()
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Total Sampel Data", f"{len(df_bike):,} jam")
+    k2.metric("Fitur Utama", "12 Variabel")
+    k3.metric("Missing Value", "0 (Bersih)")
+    k4.metric("Rata-Rata Sewa/Jam", f"{df_bike['count'].mean():.1f} unit")
 
-    st.success("Server terverifikasi online. Silakan lanjutkan ke formulir estimasi batch di bawah ini.")
+    c_left, c_right = st.columns([3, 2])
+    with c_left:
+        st.markdown(
+            """
+            <div class="accent-card">
+                <h4>Tentang Proyek & Masalah Utama</h4>
+                <p>
+                    Sistem penyewaan sepeda perkotaan (Capital Bikeshare, Washington D.C.) sering mengalami ketimpangan stok:
+                    stasiun transit kehabisan sepeda saat jam berangkat kerja (08:00), sementara stasiun lain penuh sesak.
+                    Proyek ini menggabungkan praktik komponen web Streamlit (Bab 1 & Bab 2) dengan pipeline Machine Learning
+                    untuk memprediksi kebutuhan armada secara presisi.
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.markdown("### Alur Sistem & Cakupan Halaman")
+        st.markdown(
+            """
+            1. **Pengantar & Modul Bab 1–2:** Implementasi penuh elemen teks, data display, grafik, peta, 11 widget input, multimedia, layout container, dan form control flow.
+            2. **Eksplorasi Data (EDA):** Audit kualitas data dan temuan 10 masalah kritis (skewness, multikolinearitas `temp`/`atemp`, pola bimodal jam kerja).
+            3. **Preprocessing & PCA:** Ekstraksi fitur waktu (`hour`, `month`, `year`), transformasi target `log1p`, dan reduksi dimensi PCA.
+            4. **Modelling & Evaluasi:** Perbandingan objektif 3 paradigma algoritma (**Ridge**, **KNN**, dan **HistGradientBoosting**).
+            5. **Penerapan:** Simulasi prediksi real-time, prediksi massal CSV + arsip S3, serta pencatatan riwayat ke Cloud PostgreSQL.
+            """
+        )
 
-    st.divider()
-
-    # 2. st.form dan st.form_submit_button
-    st.markdown("### 2. Formulir Batching (`st.form` & `st.form_submit_button`)")
-    st.markdown("""
-    Secara default, Streamlit mengeksekusi ulang seluruh skrip setiap kali sebuah widget diubah nilainya. 
-    Dengan menggunakan `st.form()`, seluruh input dikemas dalam satu transaksi, dan aplikasi hanya memproses 
-    kalkulasi saat tombol **Submit Form** ditekan.
-    """)
-
-    with st.form("form_batch_demand"):
-        f_col1, f_col2 = st.columns(2)
-        with f_col1:
-            inp_jam = st.slider("Jam Operasional (0 - 23):", 0, 23, 8)
-            inp_suhu = st.number_input("Suhu Udara (°C):", min_value=-5.0, max_value=45.0, value=24.0, step=0.5)
-            inp_cuaca = st.selectbox("Kondisi Cuaca:", ["1: Cerah", "2: Mendung", "3: Hujan Ringan", "4: Badai"])
-        
-        with f_col2:
-            inp_kelembaban = st.slider("Kelembaban Udara (%):", 0, 100, 65)
-            inp_angin = st.number_input("Kecepatan Angin (km/jam):", min_value=0.0, max_value=60.0, value=11.5, step=0.5)
-            inp_hari_kerja = st.checkbox("Hari Kerja Efektif (Senin - Jumat)", value=True)
-
-        btn_submit = st.form_submit_button("Hitung Estimasi Peminjaman Armada Sepeda")
-
-    if btn_submit:
-        # Perhitungan estimasi demand
-        base_demand = 85
-        if inp_jam in [8, 9, 17, 18]:
-            factor_jam = 3.2 if inp_hari_kerja else 1.3
-        elif 11 <= inp_jam <= 15:
-            factor_jam = 1.6 if not inp_hari_kerja else 1.1
-        else:
-            factor_jam = 0.35
-
-        factor_temp = max(0.4, inp_suhu / 25.0)
-        factor_wthr = 1.0 if inp_cuaca.startswith("1") else (0.8 if inp_cuaca.startswith("2") else 0.4)
-        factor_hmd = max(0.4, 1.0 - (inp_kelembaban / 180.0))
-
-        pred_total = int(base_demand * factor_jam * factor_temp * factor_wthr * factor_hmd)
-        pred_reg = int(pred_total * (0.86 if inp_hari_kerja else 0.42))
-        pred_cas = pred_total - pred_reg
-
-        st.success(f"Estimasi Kebutuhan Armada: **{pred_total} sepeda / jam**")
-        
-        res1, res2, res3 = st.columns(3)
-        res1.metric("Total Estimasi Sewa", f"{pred_total} unit")
-        res2.metric("Estimasi Komuter (Registered)", f"{pred_reg} unit")
-        res3.metric("Estimasi Rekreasi (Casual)", f"{pred_cas} unit")
-
-    st.divider()
-
-    # 3. st.rerun
-    st.markdown("### 3. Eksekusi Ulang Aplikasi Programatik (`st.rerun`)")
-    st.caption("Fungsi st.rerun() digunakan untuk me-reset session state dan memuat ulang data.")
-    if st.button("Segarkan Ulang Aplikasi (st.rerun)"):
-        st.info("Me-refresh aplikasi...")
-        st.rerun()
+    with c_right:
+        st.markdown(
+            """
+            <div class="accent-card">
+                <h4>Tim Penyusun — Kelompok 7</h4>
+                <p>
+                    <strong>1. Daerobi</strong> (241011401811) — Arsitektur & Model<br>
+                    <strong>2. Hendro Tri Dewanto</strong> (241011401696) — Data Pipeline<br>
+                    <strong>3. Nasrudin Ali Albana</strong> (241011402086) — Evaluasi & Laporan<br><br>
+                    <em>Program Studi Teknik Informatika, Semester 5<br>Universitas Pamulang (UNPAM)</em>
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.info(f"Sumber Dataset Aktif: {DATA_SOURCE_LABEL}")
 
 
 # ==============================================================================
-# MODUL 9: SHOWCASE TERPADU SIMULATOR BIKE SHARING
+# HALAMAN 2: BAB 1 & 2.1-2.3 (TEKS & DATA)
 # ==============================================================================
-elif selected_menu == "9. Showcase Terpadu: Simulator Bike Sharing":
-    st.markdown("<h1 class='main-title'>Showcase Terpadu: Dashboard Rebalancing Bike Sharing</h1>", unsafe_allow_html=True)
-    st.markdown("<p class='sub-title'>Integrasi seluruh materi Bab 1 & Bab 2 ke dalam Sistem Informasi Rebalancing Cerdas Kelompok 7</p>", unsafe_allow_html=True)
+def page_bab1_data():
+    st.markdown("<div class='main-title'>Bab 1 & Bab 2.1–2.3: Pengenalan, Elemen Teks & Data</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sub-title'>Praktik dasar Streamlit: st.write, elemen tipografi, rumus LaTeX, dataframe, table, metric, dan json.</div>", unsafe_allow_html=True)
 
-    # Filter Atas
-    st.markdown("### Filter Waktu & Kondisi Operasional")
-    f1, f2, f3, f4 = st.columns(4)
-    with f1:
-        sel_hour = st.slider("Jam Simulasi (WIB):", 0, 23, 8)
-    with f2:
-        sel_temp = st.slider("Suhu Lingkungan (°C):", 5.0, 40.0, 26.0)
-    with f3:
-        sel_day_type = st.radio("Tipe Hari:", ["Hari Kerja (Komuter)", "Akhir Pekan (Rekreasi)"])
-    with f4:
-        sel_weather = st.selectbox("Cuaca:", ["Cerah", "Mendung", "Hujan Gerimis"])
+    t1, t2, t3 = st.tabs(["Bab 1: Setup & Aplikasi Pertama", "Bab 2.1–2.2: st.write & Elemen Teks", "Bab 2.3: Menampilkan Data"])
 
-    is_work = (sel_day_type == "Hari Kerja (Komuter)")
+    with t1:
+        st.markdown("#### Tahapan Instalasi & Menjalankan Aplikasi Pertama (Bab 1.2–1.3)")
+        st.code(
+            "python -m venv venv\n"
+            "venv\\Scripts\\activate\n"
+            "pip install streamlit pandas numpy scikit-learn plotly\n"
+            "streamlit run app.py",
+            language="bash",
+        )
+        st.success("Aplikasi pertama berhasil berjalan di localhost dan siap menampilkan dataset Bike Sharing Demand.")
 
-    # Perhitungan Demand Cerdas
-    base_calc = 100
-    rush_mult = 3.4 if (sel_hour in [8, 9, 17, 18] and is_work) else (1.4 if not is_work and 12 <= sel_hour <= 16 else 0.5)
-    w_mult = 1.0 if sel_weather == "Cerah" else (0.75 if sel_weather == "Mendung" else 0.4)
-    t_mult = max(0.5, sel_temp / 24.0)
+    with t2:
+        st.markdown("#### Demonstrasi `st.write()` dan Elemen Teks (`st.title`, `st.markdown`, `st.latex`)")
+        st.write("Menampilkan ringkasan 5 baris pertama dataset menggunakan `st.write()`:")
+        st.write(df_bike[["datetime", "season", "temp", "humidity", "count"]].head(5))
+        st.divider()
+        st.markdown("**Formula Evaluasi Utama (RMSLE):**")
+        st.latex(r"\text{RMSLE} = \sqrt{\frac{1}{n} \sum_{i=1}^{n} \left( \log(p_i + 1) - \log(a_i + 1) \right)^2}")
+        st.caption("Keterangan: p_i adalah prediksi model dan a_i adalah jumlah penyewaan aktual.")
 
-    est_demand = int(base_calc * rush_mult * w_mult * t_mult)
-    est_reg = int(est_demand * (0.88 if is_work else 0.45))
-    est_cas = est_demand - est_reg
-    trucks_needed = max(1, int(np.ceil(est_demand / 75)))
+    with t3:
+        st.markdown("#### 1. Tabel Interaktif (`st.dataframe`)")
+        st.dataframe(df_bike.head(15), use_container_width=True)
 
-    # Metrik KPI Rebalancing
-    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-    kpi1.metric("Prediksi Total Demand", f"{est_demand} unit/jam", f"{'+45%' if rush_mult > 2 else '-12%'}")
-    kpi2.metric("Kebutuhan Komuter", f"{est_reg} unit", f"{int(est_reg/est_demand*100)}%")
-    kpi3.metric("Kebutuhan Rekreasi", f"{est_cas} unit", f"{int(est_cas/est_demand*100)}%")
-    kpi4.metric("Truk Rebalancing Wajib", f"{trucks_needed} Truk", "Status Siap")
+        st.markdown("#### 2. Tabel Statistik Statis (`st.table`)")
+        stats = df_bike[["temp", "humidity", "windspeed", "casual", "registered", "count"]].describe().round(2)
+        st.table(stats.loc[["mean", "std", "min", "max"]])
 
-    st.divider()
+        st.markdown("#### 3. Kartu Indikator Kinerja (`st.metric`) & JSON (`st.json`)")
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Total Penyewaan", f"{int(df_bike['count'].sum()):,}", "+12.4%")
+        m2.metric("Rata-Rata Suhu", f"{df_bike['temp'].mean():.1f} °C", "+1.2 °C")
+        m3.metric("Porsi Komuter", f"{(df_bike['registered'].sum()/df_bike['count'].sum()*100):.1f}%")
+        m4.metric("Puncak Tertinggi", f"{int(df_bike['count'].max()):,} unit/jam")
 
-    # Visualisasi Peta dan Distribusi
-    col_map, col_chart = st.columns([1, 1])
-
-    with col_map:
-        st.markdown("#### Peta Status Stasiun Sepeda Terkini")
-        station_sim = pd.DataFrame({
-            'station_name': ['Lincoln Memorial', 'Dupont Circle Metro', 'Union Station', 'Georgetown', 'Smithsonian', 'Foggy Bottom GWU'],
-            'lat': [38.8893, 38.9096, 38.8978, 38.9030, 38.8882, 38.9009],
-            'lon': [-77.0502, -77.0434, -77.0063, -77.0620, -77.0199, -77.0503],
-            'status': ['Cukup', 'Kritis (Perlu Truk)', 'Penuh (Perlu Ambil)', 'Cukup', 'Cukup', 'Kritis (Perlu Truk)']
+        st.json({
+            "dataset": "Capital Bikeshare Washington D.C.",
+            "rows": int(len(df_bike)),
+            "target": "count (casual + registered)",
+            "data_source": DATA_SOURCE_LABEL,
         })
-        st.map(station_sim[['lat', 'lon']], zoom=12)
-        st.dataframe(station_sim[['station_name', 'status']], use_container_width=True)
 
-    with col_chart:
-        st.markdown("#### Simulasi Kurva Permintaan Sepeda 24 Jam")
-        hours_range = np.arange(24)
-        sim_curve = []
-        for h in hours_range:
-            mult = 3.4 if (h in [8, 9, 17, 18] and is_work) else (1.4 if not is_work and 12 <= h <= 16 else 0.4)
-            sim_curve.append(int(base_calc * mult * w_mult * t_mult))
-        
-        sim_df = pd.DataFrame({"Jam": hours_range, "Prediksi Rental": sim_curve}).set_index("Jam")
-        st.line_chart(sim_df)
 
-    st.success("Showcase Terpadu ini menggabungkan seluruh elemen Bab 1 dan Bab 2 secara komprehensif, berbasis dataset Bike Sharing Demand Kelompok 7.")
+# ==============================================================================
+# HALAMAN 3: BAB 2.4-2.5 (GRAFIK & INPUT FORM)
+# ==============================================================================
+def page_bab2_grafik_input():
+    st.markdown("<div class='main-title'>Bab 2.4–2.5: Visualisasi Grafik & Input Widget</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sub-title'>Implementasi line/area/bar chart, peta geografis, Altair, Plotly, 11 input widget, dan data editor.</div>", unsafe_allow_html=True)
 
-    st.divider()
-    st.markdown("#### Penyimpanan & Riwayat Simulasi (Cloud PostgreSQL)")
-    col_save, col_note = st.columns([1, 2])
-    with col_note:
-        sim_note = st.text_input("Catatan Operasional (Opsional):", placeholder="Misal: Shift pagi cuaca cerah sekitar stasiun metro")
-    with col_save:
+    tab_g, tab_i = st.tabs(["Bab 2.4: Grafik & Peta", "Bab 2.5: 11 Input Widget & Data Editor"])
+
+    with tab_g:
+        hourly = df_bike.groupby("hour")[["count", "registered", "casual"]].mean()
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("**Tren Penyewaan 24 Jam (`st.line_chart`)**")
+            st.line_chart(hourly["count"])
+        with c2:
+            st.markdown("**Komposisi Komuter vs Kasual (`st.area_chart`)**")
+            st.area_chart(hourly[["registered", "casual"]])
+
+        c3, c4 = st.columns(2)
+        with c3:
+            st.markdown("**Rata-Rata Sewa per Musim (`st.bar_chart`)**")
+            season_df = df_bike.groupby("season")["count"].mean().rename(index=SEASON_LABELS)
+            st.bar_chart(season_df)
+        with c4:
+            st.markdown("**Peta Sebaran Stasiun (`st.map`)**")
+            stations = pd.DataFrame({
+                "lat": [38.8893, 38.9096, 38.8978, 38.9030, 38.8882],
+                "lon": [-77.0502, -77.0434, -77.0063, -77.0620, -77.0199],
+            })
+            st.map(stations, zoom=12)
+
+        st.markdown("**Visualisasi Interaktif Altair & Plotly**")
+        a_col, p_col = st.columns(2)
+        with a_col:
+            sample_a = df_bike.sample(min(400, len(df_bike)), random_state=42)
+            chart_alt = alt.Chart(sample_a).mark_circle(size=55, opacity=0.65).encode(
+                x=alt.X("temp:Q", title="Suhu (°C)"),
+                y=alt.Y("count:Q", title="Total Sewa"),
+                color=alt.Color("season:N", title="Musim"),
+                tooltip=["temp", "humidity", "count"],
+            ).interactive()
+            st.altair_chart(chart_alt, use_container_width=True)
+        with p_col:
+            fig_px = px.box(
+                df_bike.assign(Cuaca=df_bike["weather"].map(WEATHER_LABELS)),
+                x="Cuaca", y="count", color="Cuaca",
+                title="Distribusi Sewa Berdasarkan Kondisi Cuaca",
+            )
+            fig_px.update_layout(showlegend=False, height=340)
+            st.plotly_chart(fig_px, use_container_width=True)
+
+    with tab_i:
+        col_a, col_b = st.columns(2)
+        with col_a:
+            nama_op = st.text_input("1. Nama Petugas / Penguji:", "Daerobi")
+            catatan = st.text_area("2. Catatan Kondisi Lapangan:", "Jam sibuk pagi sekitar stasiun metro.")
+            kapasitas = st.number_input("3. Kapasitas Truk Rebalancing:", min_value=10, max_value=200, value=75)
+            suhu_sl = st.slider("4. Simulasi Suhu (°C):", 0.0, 42.0, 26.5)
+            tgl = st.date_input("5. Tanggal Operasional:", datetime.date(2026, 11, 25))
+            jam = st.time_input("6. Jam Inspeksi:", datetime.time(8, 0))
+        with col_b:
+            musim_rad = st.radio("7. Pilih Musim:", list(SEASON_LABELS.values()), horizontal=True)
+            cuaca_sel = st.selectbox("8. Kondisi Cuaca:", list(WEATHER_LABELS.values()))
+            zona_ms = st.multiselect("9. Zona Prioritas:", ["Union Station", "Dupont Circle", "Lincoln Memorial", "Georgetown"], default=["Union Station"])
+            setuju_cb = st.checkbox("10. Aktifkan Mode Hemat Energi Dock", value=True)
+            mode_tgl = st.toggle("11. Mode Siaga Jam Sibuk", value=True)
+            if st.button("Cek Ringkasan Input"):
+                st.success(f"Petugas {nama_op} | {tgl} {jam} | {musim_rad} | Zona: {', '.join(zona_ms)}")
+
+        st.markdown("**Tabel Editor Interaktif (`st.data_editor`)**")
+        edit_df = pd.DataFrame({
+            "Stasiun": ["Union Station", "Dupont Circle", "Lincoln Memorial"],
+            "Stok Sepeda": [25, 12, 30],
+            "Perlu Truk": [False, True, False],
+        })
+        st.data_editor(edit_df, use_container_width=True)
+
+
+# ==============================================================================
+# HALAMAN 4: BAB 2.6-2.8 (MEDIA, LAYOUT & CONTROL FLOW)
+# ==============================================================================
+def page_bab2_media_layout():
+    st.markdown("<div class='main-title'>Bab 2.6–2.8: Multimedia, Layout Container & Control Flow</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sub-title'>Penerapan st.image, st.audio, st.video (S3), st.columns, st.expander, st.form, st.stop, dan st.rerun.</div>", unsafe_allow_html=True)
+
+    t_med, t_lay, t_ctrl = st.tabs(["Bab 2.6: Multimedia", "Bab 2.7: Layout & Container", "Bab 2.8: Control Flow & Form"])
+
+    with t_med:
+        base_dir = Path(__file__).resolve().parent
+        m1, m2 = st.columns(2)
+        with m1:
+            st.markdown("**1. Gambar (`st.image`)**")
+            img_path = base_dir / "assets" / "crisp_dm_pipeline.png"
+            if img_path.exists():
+                st.image(str(img_path), caption="Pipeline CRISP-DM Bike Sharing Kelompok 7", use_container_width=True)
+            st.markdown("**2. Audio Notifikasi (`st.audio`)**")
+            aud_path = base_dir / "assets" / "station_chime.wav"
+            if aud_path.exists():
+                st.audio(str(aud_path), format="audio/wav")
+        with m2:
+            st.markdown("**3. Video Simulasi (`st.video` — Cloud Object Storage)**")
+            st.video("https://s3.daeroom.my.id/bikesharingdemand-assets/media/bike_sharing_demo.mp4")
+
+    with t_lay:
+        with st.container(border=True):
+            st.markdown("#### Container Berbingkai (`st.container(border=True)`)")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Stasiun Aktif", "142 Titik")
+            c2.metric("Armada Sepeda", "3.200 Unit")
+            c3.metric("Ketersediaan", "94,2%")
+        with st.expander("Penjelasan Layout & Responsivitas"):
+            st.write("Penggunaan `st.columns`, `st.tabs`, dan `st.expander` menjaga halaman tetap ringkas baik di desktop maupun layar ponsel.")
+
+    with t_ctrl:
+        with st.form("form_control_flow"):
+            st.markdown("**Batching Form (`st.form`) — Mengirim banyak input sekaligus**")
+            f_name = st.text_input("Nama Operator:", "Hendro Tri Dewanto")
+            f_unit = st.slider("Jumlah Unit Dikirim:", 5, 100, 30)
+            submitted = st.form_submit_button("Kirim Instruksi")
+            if submitted:
+                st.success(f"Instruksi pengiriman {f_unit} sepeda oleh {f_name} diterima.")
+
+        if st.button("Refresh Tampilan (`st.rerun`)"):
+            st.rerun()
+
+
+# ==============================================================================
+# HALAMAN 5: EKSPLORASI DATA (EDA)
+# ==============================================================================
+def page_eda():
+    st.markdown("<div class='main-title'>Eksplorasi Data (EDA) & Audit Kualitas</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sub-title'>Analisis distribusi, korelasi fitur, dan rangkuman 10 temuan kritis dataset Bike Sharing Demand.</div>", unsafe_allow_html=True)
+
+    e1, e2, e3, e4 = st.columns(4)
+    e1.metric("Baris Duplikat", f"{df_bike.duplicated().sum()}")
+    e2.metric("Missing Value", f"{int(df_bike.isna().sum().sum())}")
+    e3.metric("Skewness Target (count)", f"{df_bike['count'].skew():.2f}")
+    e4.metric("Korelasi temp vs atemp", f"{df_bike['temp'].corr(df_bike['atemp']):.3f}")
+
+    tab_dist, tab_corr, tab_10 = st.tabs(["Distribusi & Pola Jam", "Korelasi Antar Fitur", "10 Masalah Kritis EDA"])
+
+    with tab_dist:
+        c1, c2 = st.columns(2)
+        with c1:
+            fig_h = px.histogram(df_bike, x="count", nbins=45, title="Distribusi Target Sewa (Right-Skewed)")
+            st.plotly_chart(fig_h, use_container_width=True)
+        with c2:
+            grp = df_bike.groupby(["hour", "workingday"])["count"].mean().reset_index()
+            grp["Tipe Hari"] = grp["workingday"].map({1: "Hari Kerja", 0: "Akhir Pekan / Libur"})
+            fig_w = px.line(grp, x="hour", y="count", color="Tipe Hari", markers=True, title="Pola Bimodal Hari Kerja vs Rekreasi Akhir Pekan")
+            st.plotly_chart(fig_w, use_container_width=True)
+
+    with tab_corr:
+        num_cols = ["temp", "atemp", "humidity", "windspeed", "casual", "registered", "count"]
+        corr_mat = df_bike[num_cols].corr().round(2)
+        fig_hm = px.imshow(corr_mat, text_auto=True, color_continuous_scale="Blues", title="Heatmap Korelasi Fitur Numerik")
+        st.plotly_chart(fig_hm, use_container_width=True)
+
+    with tab_10:
+        issues = pd.DataFrame([
+            ("1. Skewness Target Ekstrem", "Target `count` condong kanan (skew > 1.2).", "Transformasi `np.log1p(count)` saat training."),
+            ("2. Multikolinearitas temp & atemp", "Korelasi `temp` dan `atemp` > 0.98.", "Gunakan regularisasi Ridge atau model Tree."),
+            ("3. Anomali Windspeed = 0", "Banyak nilai `windspeed == 0` (sensor/pembulatan).", "Model Tree tahan terhadap nilai 0 diskrit."),
+            ("4. Pola Non-Linear Jam Sibuk", "Dua puncak tajam pada pukul 08:00 dan 17:00.", "Ekstraksi fitur `hour` & model non-linear."),
+            ("5. Disparitas Skala Fitur", "Rentang `humidity` (0-100) vs `workingday` (0-1).", "Terapkan `StandardScaler` di dalam Pipeline."),
+            ("6. Kebocoran Data (casual + registered)", "`casual + registered == count` secara persis.", "Dilarang masuk sebagai fitur input prediksi `count`."),
+            ("7. Tren Pertumbuhan Tahunan", "Penyewaan tahun 2012 jauh lebih tinggi dari 2011.", "Sertakan fitur `year` dan `month`."),
+            ("8. Ketimpangan Cuaca Ekstrem", "Cuaca kode 4 (badai) sangat jarang muncul.", "Gunakan metrik RMSLE agar tidak bias."),
+            ("9. Perbedaan Perilaku Hari Kerja", "Komuter mendominasi hari kerja, kasual di akhir pekan.", "Kombinasi `workingday` dan `dayofweek`."),
+            ("10. Risiko Data Leakage Saat Scaling", "Scaling sebelum split membocorkan statistik uji.", "Bungkus scaler dalam `sklearn.pipeline.Pipeline`."),
+        ], columns=["Temuan Masalah", "Deskripsi", "Solusi di Pipeline"])
+        st.dataframe(issues, use_container_width=True, hide_index=True)
+
+
+# ==============================================================================
+# HALAMAN 6: PREPROCESSING & PCA
+# ==============================================================================
+def page_preprocessing_pca():
+    st.markdown("<div class='main-title'>Preprocessing & Reduksi Dimensi (PCA)</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sub-title'>Ekstraksi fitur waktu, transformasi logaritmik target, dan analisis Principal Component Analysis.</div>", unsafe_allow_html=True)
+
+    t_prep, t_pca = st.tabs(["Feature Engineering & Scaling", "Reduksi Dimensi (PCA)"])
+
+    with t_prep:
+        st.markdown("#### Perbandingan Fitur Sebelum vs Sesudah Preprocessing")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("**Data Mentah (Raw `datetime`)**")
+            st.dataframe(df_bike[["datetime", "season", "temp", "humidity", "count"]].head(5), use_container_width=True)
+        with c2:
+            st.markdown("**Setelah Ekstraksi Waktu + Target `log1p(count)`**")
+            prep_sample = df_bike[["hour", "dayofweek", "month", "year", "temp", "humidity"]].head(5).copy()
+            prep_sample["log1p_count"] = np.log1p(df_bike["count"].head(5)).round(3)
+            st.dataframe(prep_sample, use_container_width=True)
+
+    with t_pca:
+        pca_cols = ["season", "weather", "temp", "atemp", "humidity", "windspeed", "hour", "month"]
+        X_scaled = StandardScaler().fit_transform(df_bike[pca_cols])
+        n_comp = st.slider("Jumlah Komponen PCA:", 2, len(pca_cols), 4)
+        pca = PCA(n_components=n_comp, random_state=42)
+        comps = pca.fit_transform(X_scaled)
+        cum_var = np.cumsum(pca.explained_variance_ratio_)
+
+        p1, p2, p3 = st.columns(3)
+        p1.metric("Dimensi Awal", f"{len(pca_cols)} fitur")
+        p2.metric("Dimensi Tereduksi", f"{n_comp} komponen", f"-{round((1 - n_comp/len(pca_cols))*100)}%")
+        p3.metric("Varians Dipertahankan", f"{cum_var[-1]*100:.2f}%")
+
+        scree_df = pd.DataFrame({
+            "Komponen": [f"PC{i+1}" for i in range(n_comp)],
+            "Varians (%)": (pca.explained_variance_ratio_ * 100).round(2),
+            "Kumulatif (%)": (cum_var * 100).round(2),
+        })
+        fig_scree = px.bar(scree_df, x="Komponen", y="Varians (%)", text="Varians (%)", title="Scree Plot Varians yang Dijelaskan per Komponen PCA")
+        st.plotly_chart(fig_scree, use_container_width=True)
+
+
+# ==============================================================================
+# HALAMAN 7: MODELLING & EVALUASI (3 PARADIGMA)
+# ==============================================================================
+def page_modelling():
+    st.markdown("<div class='main-title'>Modelling & Evaluasi 3 Paradigma Algoritma</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sub-title'>Benchmark langsung pada 20% data uji antara Paradigma Linear, Berbasis Jarak, dan Berbasis Pohon.</div>", unsafe_allow_html=True)
+
+    with st.spinner("Melatih dan mengevaluasi 3 paradigma model..."):
+        _, eval_df, _, _ = train_three_paradigms(len(df_bike), df_bike)
+
+    st.dataframe(eval_df, use_container_width=True, hide_index=True)
+
+    g1, g2 = st.columns(2)
+    with g1:
+        fig_r2 = px.bar(eval_df, x="Model", y="R2 Score", color="Model", text="Skor (%)", title="Perbandingan Akurasi R2 Score (Lebih Tinggi Lebih Baik)")
+        fig_r2.update_layout(showlegend=False, yaxis_range=[0, 1.1])
+        st.plotly_chart(fig_r2, use_container_width=True)
+    with g2:
+        fig_err = px.bar(eval_df, x="Model", y=["RMSE", "MAE"], barmode="group", title="Perbandingan Error RMSE & MAE (Lebih Rendah Lebih Baik)")
+        st.plotly_chart(fig_err, use_container_width=True)
+
+    st.success("HistGradientBoosting (Paradigma Pohon) unggul signifikan dengan R2 di atas 94% karena mampu menangkap interaksi non-linear jam sibuk dan cuaca.")
+
+
+# ==============================================================================
+# HALAMAN 8: SIMULASI & PREDIKSI REAL-TIME
+# ==============================================================================
+def page_simulasi():
+    st.markdown("<div class='main-title'>Simulasi & Prediksi Sewa Sepeda (3 Model)</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sub-title'>Uji kondisi cuaca dan waktu secara langsung terhadap ketiga model terlatih serta simpan hasilnya ke database.</div>", unsafe_allow_html=True)
+
+    trained_models, eval_df, X_test, y_test = train_three_paradigms(len(df_bike), df_bike)
+
+    with st.container(border=True):
+        c1, c2, c3, c4 = st.columns(4)
+        sel_hour = c1.slider("Jam (0 - 23):", 0, 23, 8)
+        sel_month = c2.slider("Bulan (1 - 12):", 1, 12, 6)
+        sel_year = c3.selectbox("Tahun Acuan:", [2012, 2011])
+        day_mode = c4.selectbox("Tipe Hari:", ["Hari Kerja", "Akhir Pekan", "Hari Libur Nasional"])
+
+        d1, d2, d3, d4 = st.columns(4)
+        sel_season = d1.selectbox("Musim:", list(SEASON_LABELS.values()), index=1)
+        sel_weather = d2.selectbox("Cuaca:", list(WEATHER_LABELS.values()), index=0)
+        sel_temp = d3.slider("Suhu (°C):", 1.0, 41.0, 26.0, step=0.5)
+        sel_hum = d4.slider("Kelembaban (%):", 0, 100, 60)
+
+    season_id = [k for k, v in SEASON_LABELS.items() if v == sel_season][0]
+    weather_id = [k for k, v in WEATHER_LABELS.items() if v == sel_weather][0]
+    is_work = 1 if day_mode == "Hari Kerja" else 0
+    is_hol = 1 if day_mode == "Hari Libur Nasional" else 0
+
+    row_in = pd.DataFrame([{
+        "season": season_id, "holiday": is_hol, "workingday": is_work, "weather": weather_id,
+        "temp": sel_temp, "atemp": min(45.0, sel_temp + 2.0), "humidity": sel_hum, "windspeed": 12.0,
+        "hour": sel_hour, "dayofweek": 2 if is_work else 6, "month": sel_month, "year": sel_year,
+    }])[FEATURE_COLUMNS]
+
+    p_r = int(max(0, round(float(trained_models["Ridge Regression (Linear)"].predict(row_in)[0]))))
+    p_k = int(max(0, round(float(trained_models["K-Nearest Neighbors (k=7)"].predict(row_in)[0]))))
+    p_h = int(max(0, round(float(trained_models["HistGradientBoosting (Tree)"].predict(row_in)[0]))))
+    trucks = max(1, int(np.ceil(p_h / 75)))
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Model 1: Ridge", f"{p_r:,} unit/jam")
+    k2.metric("Model 2: KNN (k=7)", f"{p_k:,} unit/jam")
+    k3.metric("Model 3: HGB (Juara)", f"{p_h:,} unit/jam")
+    k4.metric("Truk Rebalancing", f"{trucks} Truk", "Kapasitas 75/truk")
+
+    # Kurva 24 jam
+    rows_24 = []
+    for h in range(24):
+        r = row_in.iloc[0].to_dict()
+        r["hour"] = h
+        rows_24.append(r)
+    df_24 = pd.DataFrame(rows_24)[FEATURE_COLUMNS]
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=list(range(24)), y=np.maximum(0, np.round(trained_models["Ridge Regression (Linear)"].predict(df_24))), name="Ridge", line=dict(dash="dash", color="#94a3b8")))
+    fig.add_trace(go.Scatter(x=list(range(24)), y=np.maximum(0, np.round(trained_models["K-Nearest Neighbors (k=7)"].predict(df_24))), name="KNN", line=dict(color="#f59e0b")))
+    fig.add_trace(go.Scatter(x=list(range(24)), y=np.maximum(0, np.round(trained_models["HistGradientBoosting (Tree)"].predict(df_24))), name="HistGradientBoosting (Juara)", line=dict(width=3.5, color="#0284c7")))
+    fig.add_vline(x=sel_hour, line_dash="dot", line_color="#0f172a")
+    fig.update_layout(title="Kurva Prediksi 24 Jam (Adu 3 Model)", xaxis_title="Jam", yaxis_title="Unit/Jam", hovermode="x unified", height=360)
+    st.plotly_chart(fig, use_container_width=True)
+
+    sc1, sc2 = st.columns([2, 1])
+    note = sc1.text_input("Catatan Simulasi:", placeholder="Misal: Uji jam sibuk pagi")
+    with sc2:
         st.write("")
         st.write("")
         if st.button("Simpan Simulasi ke Database", type="primary", use_container_width=True):
@@ -850,36 +656,142 @@ elif selected_menu == "9. Showcase Terpadu: Simulator Bike Sharing":
                         "INSERT INTO prediction_logs "
                         "(jam, suhu, tipe_hari, cuaca, pred_total, pred_komuter, pred_rekreasi, truk_dibutuhkan, catatan) "
                         "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);",
-                        params=[
-                            int(sel_hour),
-                            float(sel_temp),
-                            str(sel_day_type),
-                            str(sel_weather),
-                            int(est_demand),
-                            int(est_reg),
-                            int(est_cas),
-                            int(trucks_needed),
-                            sim_note or "Simulasi rutin",
-                        ],
+                        params=[sel_hour, float(sel_temp), day_mode, sel_weather, p_h, int(p_h * 0.8), p_h - int(p_h * 0.8), trucks, note or "Simulasi Web 1"],
                     )
-                    st.toast("Simulasi berhasil disimpan ke database.")
+                    st.toast("Simulasi tersimpan ke PostgreSQL.")
+                    st.success("Berhasil disimpan ke database.")
                 except Exception as err:
-                    st.error(f"Gagal menyimpan ke database: {err}")
-            else:
-                st.warning("Koneksi database belum aktif.")
+                    st.error(f"Gagal menyimpan: {err}")
 
+
+# ==============================================================================
+# HALAMAN 9: PREDIKSI MASSAL (CSV)
+# ==============================================================================
+def page_batch_csv():
+    st.markdown("<div class='main-title'>Prediksi Massal Berbasis CSV</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sub-title'>Upload tabel ramalan cuaca 24 jam/mingguan untuk diprediksi serentak lalu unduh hasilnya.</div>", unsafe_allow_html=True)
+
+    trained_models, _, _, _ = train_three_paradigms(len(df_bike), df_bike)
+    sample_batch = pd.DataFrame({
+        "season": [2] * 24, "holiday": [0] * 24, "workingday": [1] * 24,
+        "weather": [1 if h not in [14, 15] else 2 for h in range(24)],
+        "temp": [round(20 + 6 * np.sin((h - 6) * np.pi / 12), 1) for h in range(24)],
+        "atemp": [round(22 + 6 * np.sin((h - 6) * np.pi / 12), 1) for h in range(24)],
+        "humidity": [60] * 24, "windspeed": [10.5] * 24,
+        "hour": list(range(24)), "dayofweek": [2] * 24, "month": [6] * 24, "year": [2012] * 24,
+    })
+
+    c1, c2 = st.columns([1, 2])
+    with c1:
+        st.download_button(
+            "Download Template CSV (24 Jam)",
+            data=sample_batch.to_csv(index=False).encode("utf-8"),
+            file_name="template_bike_sharing.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+        use_default = st.checkbox("Gunakan contoh data 24 jam bawaan", value=True)
+    with c2:
+        up_file = st.file_uploader("Upload file CSV:", type=["csv"])
+
+    target_df = pd.read_csv(up_file) if up_file is not None else (sample_batch.copy() if use_default else None)
+    if target_df is not None:
+        missing = [c for c in FEATURE_COLUMNS if c not in target_df.columns]
+        if missing:
+            st.error(f"Kolom wajib kurang: {missing}")
+        else:
+            out = target_df.copy()
+            out["pred_ridge"] = np.maximum(0, np.round(trained_models["Ridge Regression (Linear)"].predict(out[FEATURE_COLUMNS]))).astype(int)
+            out["pred_knn"] = np.maximum(0, np.round(trained_models["K-Nearest Neighbors (k=7)"].predict(out[FEATURE_COLUMNS]))).astype(int)
+            out["pred_hgb"] = np.maximum(0, np.round(trained_models["HistGradientBoosting (Tree)"].predict(out[FEATURE_COLUMNS]))).astype(int)
+            st.dataframe(out, use_container_width=True)
+            csv_bytes = out.to_csv(index=False).encode("utf-8")
+            st.download_button("Download Hasil Prediksi (.csv)", data=csv_bytes, file_name="hasil_prediksi_bike_sharing.csv", mime="text/csv", type="primary")
+
+
+# ==============================================================================
+# HALAMAN 10: RIWAYAT DB & KESIMPULAN
+# ==============================================================================
+def page_riwayat_kesimpulan():
+    st.markdown("<div class='main-title'>Riwayat Database & Kesimpulan Akhir</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sub-title'>Catatan simulasi yang tersimpan di Cloud PostgreSQL serta rangkuman kesimpulan proyek Kelompok 7.</div>", unsafe_allow_html=True)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown(
+            """
+            <div class="accent-card">
+                <h4>Kesimpulan Utama</h4>
+                <p>
+                    1. Seluruh modul dasar Streamlit Bab 1 & Bab 2 berhasil diimplementasikan pada dataset riil Bike Sharing Demand (10.886 baris).<br>
+                    2. Model berbasis pohon keputusan (HistGradientBoosting) jauh mengungguli Ridge Regression dan KNN dalam menangkap lonjakan komuter.<br>
+                    3. Integrasi Cloud PostgreSQL & Object Storage memastikan data dan riwayat prediksi tetap sinkron baik lokal maupun saat di-hosting.
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with c2:
+        st.markdown(
+            """
+            <div class="accent-card">
+                <h4>Saran Pengembangan Lanjutan</h4>
+                <p>
+                    1. Menambahkan data kalender acara kota dan cuaca real-time dari API meteorologi.<br>
+                    2. Mengintegrasikan notifikasi otomatis ke petugas armada ketika prediksi stok stasiun di bawah ambang batas.<br>
+                    3. Menerapkan otentikasi pengguna untuk membatasi akses tulis ke database produksi.
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.divider()
+    st.markdown("#### Riwayat Simulasi Tersimpan (Cloud PostgreSQL)")
+    if st.button("Refresh Riwayat"):
+        st.rerun()
     if DAEROOM_AVAILABLE:
         try:
             logs_res = query_db(
                 "SELECT id, created_at, jam, suhu, tipe_hari, cuaca, pred_total, truk_dibutuhkan, catatan "
-                "FROM prediction_logs ORDER BY id DESC LIMIT 10;",
+                "FROM prediction_logs ORDER BY id DESC LIMIT 15;",
                 readonly=True,
             )
-            logs_rows = logs_res.get("rows", [])
-            if logs_rows:
-                st.markdown("**10 Riwayat Simulasi Terakhir di Database:**")
-                st.dataframe(pd.DataFrame(logs_rows), use_container_width=True)
+            rows = logs_res.get("rows", [])
+            if rows:
+                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
             else:
-                st.info("Belum ada riwayat simulasi tersimpan di database. Klik tombol simpan di atas untuk mencoba.")
+                st.info("Belum ada riwayat simulasi tersimpan. Coba simpan dari halaman Simulasi & Prediksi.")
         except Exception as err:
-            st.warning(f"Tidak dapat membaca tabel prediction_logs: {err}")
+            st.warning(f"Gagal membaca database: {err}")
+
+
+# ==============================================================================
+# NAVIGASI MULTI-PAGE TERSTRUKTUR (st.navigation)
+# ==============================================================================
+pg = st.navigation({
+    "Pengantar & Modul Bab 1–2": [
+        st.Page(page_beranda, title="Beranda", url_path="beranda", default=True),
+        st.Page(page_bab1_data, title="Bab 1 & 2.1–2.3: Teks & Data", url_path="modul-teks-data"),
+        st.Page(page_bab2_grafik_input, title="Bab 2.4–2.5: Grafik & Input", url_path="modul-grafik-input"),
+        st.Page(page_bab2_media_layout, title="Bab 2.6–2.8: Media & Layout", url_path="modul-media-layout"),
+    ],
+    "Pengolahan & Pemodelan": [
+        st.Page(page_eda, title="Eksplorasi Data (EDA)", url_path="eda"),
+        st.Page(page_preprocessing_pca, title="Preprocessing & PCA", url_path="preprocessing-pca"),
+        st.Page(page_modelling, title="Modelling & Evaluasi", url_path="modelling"),
+    ],
+    "Penerapan & Database": [
+        st.Page(page_simulasi, title="Simulasi & Prediksi", url_path="simulasi"),
+        st.Page(page_batch_csv, title="Prediksi Massal (CSV)", url_path="batch-csv"),
+        st.Page(page_riwayat_kesimpulan, title="Riwayat DB & Kesimpulan", url_path="kesimpulan"),
+    ],
+})
+
+with st.sidebar:
+    st.divider()
+    st.caption(f"Sumber Data: {DATA_SOURCE_LABEL}")
+    st.caption("Kelompok 7 - TI UNPAM")
+    st.caption("Daerobi | Hendro | Nasrudin")
+
+pg.run()
