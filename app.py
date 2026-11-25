@@ -353,6 +353,15 @@ def page_beranda():
             unsafe_allow_html=True,
         )
 
+    with st.expander("Diagram Alur CRISP-DM & Video Simulasi 24 Jam"):
+        v_col1, v_col2 = st.columns(2)
+        with v_col1:
+            img_path = Path(__file__).resolve().parent / "assets" / "crisp_dm_pipeline.png"
+            if img_path.exists():
+                st.image(str(img_path), caption="Kerangka Kerja CRISP-DM Bike Sharing Kelompok 7", use_container_width=True)
+        with v_col2:
+            st.video("https://s3.daeroom.my.id/bikesharingdemand-assets/media/bike_sharing_demo.mp4")
+
 
 # ==============================================================================
 # HALAMAN 2: TENTANG DATASET
@@ -473,54 +482,6 @@ def page_bab2_grafik_input():
             "Perlu Truk": [False, True, False],
         })
         st.data_editor(edit_df, use_container_width=True)
-
-
-# ==============================================================================
-# HALAMAN 4: MEDIA & ALUR OPERASIONAL
-# ==============================================================================
-def page_bab2_media_layout():
-    st.markdown("<div class='main-title'>Media Presentasi & Alur Operasional</div>", unsafe_allow_html=True)
-    st.markdown("<div class='sub-title'>Dokumentasi visual pipeline CRISP-DM, audio notifikasi stasiun, video simulasi 24 jam, dan form distribusi.</div>", unsafe_allow_html=True)
-
-    t_med, t_lay, t_ctrl = st.tabs(["Media & Video Simulasi", "Ringkasan Kapasitas", "Form Distribusi Armada"])
-
-    with t_med:
-        base_dir = Path(__file__).resolve().parent
-        m1, m2 = st.columns(2)
-        with m1:
-            st.markdown("**1. Gambar (`st.image`)**")
-            img_path = base_dir / "assets" / "crisp_dm_pipeline.png"
-            if img_path.exists():
-                st.image(str(img_path), caption="Pipeline CRISP-DM Bike Sharing Kelompok 7", use_container_width=True)
-            st.markdown("**2. Audio Notifikasi (`st.audio`)**")
-            aud_path = base_dir / "assets" / "station_chime.wav"
-            if aud_path.exists():
-                st.audio(str(aud_path), format="audio/wav")
-        with m2:
-            st.markdown("**3. Video Simulasi (`st.video` — Cloud Object Storage)**")
-            st.video("https://s3.daeroom.my.id/bikesharingdemand-assets/media/bike_sharing_demo.mp4")
-
-    with t_lay:
-        with st.container(border=True):
-            st.markdown("#### Container Berbingkai (`st.container(border=True)`)")
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Stasiun Aktif", "142 Titik")
-            c2.metric("Armada Sepeda", "3.200 Unit")
-            c3.metric("Ketersediaan", "94,2%")
-        with st.expander("Penjelasan Layout & Responsivitas"):
-            st.write("Penggunaan `st.columns`, `st.tabs`, dan `st.expander` menjaga halaman tetap ringkas baik di desktop maupun layar ponsel.")
-
-    with t_ctrl:
-        with st.form("form_control_flow"):
-            st.markdown("**Batching Form (`st.form`) — Mengirim banyak input sekaligus**")
-            f_name = st.text_input("Nama Operator:", "Hendro Tri Dewanto")
-            f_unit = st.slider("Jumlah Unit Dikirim:", 5, 100, 30)
-            submitted = st.form_submit_button("Kirim Instruksi")
-            if submitted:
-                st.success(f"Instruksi pengiriman {f_unit} sepeda oleh {f_name} diterima.")
-
-        if st.button("Refresh Tampilan (`st.rerun`)"):
-            st.rerun()
 
 
 # ==============================================================================
@@ -925,7 +886,6 @@ pg = st.navigation({
         st.Page(page_simulasi, title="Simulasi & Prediksi", icon=":material/bolt:", url_path="simulasi"),
         st.Page(page_batch_csv, title="Prediksi Massal (CSV)", icon=":material/upload_file:", url_path="batch-csv"),
         st.Page(page_bab2_grafik_input, title="Peta & Panel Armada", icon=":material/map:", url_path="armada"),
-        st.Page(page_bab2_media_layout, title="Media & Form Distribusi", icon=":material/perm_media:", url_path="media-distribusi"),
         st.Page(page_riwayat_kesimpulan, title="Riwayat DB & Kesimpulan", icon=":material/fact_check:", url_path="kesimpulan"),
     ],
 })
